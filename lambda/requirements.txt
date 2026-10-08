@@ -1,0 +1,3 @@
+# 4clique AWS Lambda dependencies
+# Built with Python 3.11 Standard Library only for ultra-fast <50ms cold starts
+# No external pip wheels needed for deployment
