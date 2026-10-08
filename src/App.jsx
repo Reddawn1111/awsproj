@@ -1,38 +1,45 @@
-import React, { useState, useEffect } from 'react';
-import { Header } from './components/Header';
+import React, { useState, useEffect, useRef } from 'react';
 import { Map3D } from './components/Map3D';
-import { RainfallControl } from './components/RainfallControl';
-import { InterventionSelector } from './components/InterventionSelector';
-import { PrimaryAWSButton } from './components/PrimaryAWSButton';
-import { BeforeAfterPanel } from './components/BeforeAfterPanel';
-import { InfrastructureMatrix } from './components/InfrastructureMatrix';
+import { GoogleMapsSearchBar } from './components/GoogleMapsSearchBar';
+import { SimulationDrawer } from './components/SimulationDrawer';
+import { LiveStatusPill } from './components/LiveStatusPill';
 import { DevToolsGuideModal } from './components/DevToolsGuideModal';
 import { SettingsModal } from './components/SettingsModal';
-import { runAwsHydrologicSimulation } from './services/awsSimulation';
-import { Info, Database, Compass, Droplet } from 'lucide-react';
+import { BENGALURU_HOTSPOTS, getBengaluruRainGridPoints, matchNearestRain } from './config/bengaluruHotspots';
+import { fetchCityRainGrid } from './services/openMeteo';
+import { runAwsBlockSimulation, runAwsLiveAssessment } from './services/awsSimulation';
+import { calculateSquareBounds, sampleTerrainGrid } from './utils/geo';
+import { reverseLocationIQ } from './services/locationiq';
 
 export function App() {
-  // Scenario state
-  const [rainfallMm, setRainfallMm] = useState(180);
-  const [intervention, setIntervention] = useState('BASELINE');
+  // App Mode: 'live' (city-wide baseline) | 'armed' (click-to-extract) | 'block' (active 1km drawer open)
+  const [appMode, setAppMode] = useState('live');
+  const [isSimulateMode, setIsSimulateMode] = useState(false);
 
-  // Simulation execution state
-  const [isLoading, setIsLoading] = useState(false);
-  const [awsStatus, setAwsStatus] = useState('IDLE'); // 'IDLE' | 'RUNNING' | 'SUCCESS' | 'ERROR'
-  const [simulationData, setSimulationData] = useState(null);
-  const [infrastructureStatus, setInfrastructureStatus] = useState({
-    "Sakra World Hospital": "OPERATIONAL",
-    "Bellandur KPTCL Substation": "FLOODED",
-    "Ecospace ORR": "OPERATIONAL"
-  });
+  // Active Block State
+  const [blockBounds, setBlockBounds] = useState(null);
+  const [blockLabel, setBlockLabel] = useState('');
+  const [blockSimulationResult, setBlockSimulationResult] = useState(null);
+  const [elevationStats, setElevationStats] = useState(null);
+  const [userLocation, setUserLocation] = useState(null);
+
+  // Simulation Drawer Controls
+  const [rainfallMm, setRainfallMm] = useState(120);
+  const [cloggingPercent, setCloggingPercent] = useState(70);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simError, setSimError] = useState(null);
   const [lastSuccessTimestamp, setLastSuccessTimestamp] = useState(null);
   const [latencyMs, setLatencyMs] = useState(0);
-  const [error, setError] = useState(null);
 
-  // Map & Navigation state
-  const [focusCoords, setFocusCoords] = useState(null);
+  // City-wide Live Assessment State
+  const [liveHotspots, setLiveHotspots] = useState([]);
+  const [liveSummary, setLiveSummary] = useState(null);
 
-  // Configuration & Overrides
+  // UI Navigation & Modals
+  const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
+  const collapseTimeoutRef = useRef(null);
+  const mapRef = useRef(null);
+
   const [mapboxToken, setMapboxToken] = useState(() => {
     return localStorage.getItem('4clique_mapbox_token') || import.meta.env.VITE_MAPBOX_TOKEN || '';
   });
@@ -40,36 +47,187 @@ export function App() {
     return localStorage.getItem('4clique_lambda_url') || import.meta.env.VITE_AWS_LAMBDA_URL || 'http://127.0.0.1:8000';
   });
 
-  // Modal controls
   const [isDevToolsModalOpen, setIsDevToolsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Initial trigger on mount to calibrate initial twin state
+  // 1. Initial City-wide Live Assessment on Mount
   useEffect(() => {
-    handleRunSimulation();
-  }, []);
+    executeCityLiveAssessment();
+    const interval = setInterval(executeCityLiveAssessment, 15 * 60 * 1000); // 15-min auto refresh
+    return () => clearInterval(interval);
+  }, [awsLambdaUrl]);
 
-  const handleRunSimulation = async () => {
-    setIsLoading(true);
-    setAwsStatus('RUNNING');
-    setError(null);
+  const executeCityLiveAssessment = async () => {
+    try {
+      // 1a. Query 5x5 rain grid across BBMP in single batch
+      const gridPoints = getBengaluruRainGridPoints();
+      const rainResults = await fetchCityRainGrid(gridPoints);
+
+      // 1b. Match rain reading to each hotspot
+      const hotspotsWithRain = BENGALURU_HOTSPOTS.map(h => ({
+        ...h,
+        rain_mm_hr: matchNearestRain(h.coords, rainResults)
+      }));
+
+      // 1c. Invoke AWS Lambda live assessment
+      const res = await runAwsLiveAssessment({
+        hotspots: hotspotsWithRain,
+        awsLambdaUrl
+      });
+
+      if (res?.hotspots) {
+        setLiveHotspots(res.hotspots);
+        setLiveSummary(res.city_summary);
+      }
+    } catch (err) {
+      console.warn("City live assessment error:", err);
+    }
+  };
+
+  // 2. Toggle "SIMULATE" Mode: Shares isSimulateMode across search bar, map, and drawer
+  const handleToggleSimulate = () => {
+    if (!isSimulateMode) {
+      setIsSimulateMode(true);
+      setAppMode('block');
+      // If no block selected yet, auto-select a 1 km x 1 km block around current map center or Bellandur
+      const center = mapRef.current ? mapRef.current.getCenter() : { lng: 77.6805, lat: 12.9352 };
+      handleSelectCoordsForBlock([center.lng, center.lat], 'Bengaluru Simulation Zone');
+    } else {
+      // Return to live city mode & clear simulation block
+      setIsSimulateMode(false);
+      setAppMode('live');
+      setBlockBounds(null);
+      setBlockSimulationResult(null);
+    }
+  };
+
+  // 3. Extract 1 km x 1 km Block on Coordinate Selection (Search result or map click)
+  const handleSelectCoordsForBlock = async ([lng, lat], label = null) => {
+    setIsSimulateMode(true);
+    setAppMode('block');
+    const bounds = calculateSquareBounds(lng, lat);
+    setBlockBounds(bounds);
+
+    // Smoothly fly camera to focus on extracted block
+    if (mapRef.current) {
+      mapRef.current.flyTo({
+        center: [lng, lat],
+        zoom: 16,
+        pitch: 65,
+        bearing: -20,
+        duration: 1600
+      });
+    }
+
+    // Reverse geocode block label if not provided
+    if (label) {
+      setBlockLabel(label);
+    } else {
+      reverseLocationIQ(lat, lng).then(r => setBlockLabel(r.primaryName));
+    }
+
+    // Auto-trigger block simulation with current parameters
+    setTimeout(() => {
+      runBlockSimulationInternal(bounds, rainfallMm, cloggingPercent);
+    }, 400);
+  };
+
+  // 4. Run 1km Block Hydrologic Simulation
+  const runBlockSimulationInternal = async (boundsToUse, rainToUse, clogToUse) => {
+    if (!boundsToUse) return;
+    setIsSimulating(true);
+    setSimError(null);
 
     try {
-      const result = await runAwsHydrologicSimulation(rainfallMm, intervention, awsLambdaUrl);
-      setSimulationData(result);
-      if (result.infrastructure_status) {
-        setInfrastructureStatus(result.infrastructure_status);
-      }
+      // Sample 16x16 terrain elevation grid inside the 1km block
+      const terrainSamples = sampleTerrainGrid(mapRef.current, boundsToUse, 16);
+
+      const result = await runAwsBlockSimulation({
+        rainfallMm: rainToUse,
+        cloggingPercent: clogToUse,
+        bounds: boundsToUse,
+        terrainSamples,
+        awsLambdaUrl
+      });
+
+      setBlockSimulationResult(result);
       setLatencyMs(result.latencyMs);
       setLastSuccessTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      setAwsStatus('SUCCESS');
     } catch (err) {
-      console.error("Hydrologic Twin Simulation Failed:", err);
-      setError(err.message);
-      setAwsStatus('ERROR');
+      console.error("Block simulation failed:", err);
+      setSimError(err.message);
     } finally {
-      setIsLoading(false);
+      setIsSimulating(false);
     }
+  };
+
+  // Preset Trigger: Extreme Monsoon Surge (145 mm/hr, 80% clogging)
+  const handleTriggerPresetSurge = () => {
+    setRainfallMm(145);
+    setCloggingPercent(80);
+    if (blockBounds) {
+      runBlockSimulationInternal(blockBounds, 145, 80);
+    }
+  };
+
+  // GPS Locate Me Button: Pinpoint Marker + Smooth Camera Fly-to + Auto-Block
+  const handleLocateMe = () => {
+    if (!navigator.geolocation) {
+      const fallback = [77.6805, 12.9352];
+      setUserLocation(fallback);
+      if (mapRef.current) {
+        mapRef.current.flyTo({ center: fallback, zoom: 16, pitch: 60, bearing: -20, duration: 1800 });
+      }
+      if (isSimulateMode) {
+        handleSelectCoordsForBlock(fallback, 'Bengaluru Center (GPS Fallback)');
+      }
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = [pos.coords.longitude, pos.coords.latitude];
+        setUserLocation(coords);
+        if (mapRef.current) {
+          mapRef.current.flyTo({ center: coords, zoom: 16.5, pitch: 60, bearing: -20, duration: 1800 });
+        }
+        if (isSimulateMode) {
+          handleSelectCoordsForBlock(coords, 'Current Location (1 km² Block)');
+        }
+      },
+      (err) => {
+        console.warn("Geolocation fallback:", err);
+        const fallback = [77.6805, 12.9352];
+        setUserLocation(fallback);
+        if (mapRef.current) {
+          mapRef.current.flyTo({ center: fallback, zoom: 16.5, pitch: 60, bearing: -20, duration: 1800 });
+        }
+        if (isSimulateMode) {
+          handleSelectCoordsForBlock(fallback, 'Bellandur Hotspot (GPS Fallback)');
+        }
+      },
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  };
+
+  // Fly Camera to selected city hotspot
+  const handleFlyToHotspot = (coords) => {
+    if (mapRef.current) {
+      mapRef.current.flyTo({ center: coords, zoom: 15.5, pitch: 60, bearing: -20, duration: 1500 });
+    }
+  };
+
+  // Map movement auto-collapse search bar
+  const handleMapMoveStart = () => {
+    if (collapseTimeoutRef.current) clearTimeout(collapseTimeoutRef.current);
+    setIsSearchCollapsed(true);
+  };
+
+  const handleMapIdle = () => {
+    if (collapseTimeoutRef.current) clearTimeout(collapseTimeoutRef.current);
+    collapseTimeoutRef.current = setTimeout(() => {
+      setIsSearchCollapsed(false);
+    }, 600);
   };
 
   const handleSaveMapboxToken = (token) => {
@@ -83,166 +241,86 @@ export function App() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', background: 'var(--bg-primary)' }}>
-      {/* Top Telemetry Header */}
-      <Header
-        activeScenarioId={simulationData?.scenario_id}
-        rainfallMm={rainfallMm}
-        awsStatus={awsStatus}
-        latencyMs={latencyMs}
-        onOpenDevToolsGuide={() => setIsDevToolsModalOpen(true)}
+    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#13171f' }}>
+      {/* 1. Full-Screen Mapbox Canvas */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
+        <Map3D
+          mapboxToken={mapboxToken}
+          mode={appMode}
+          isSimulateMode={isSimulateMode}
+          blockBounds={blockBounds}
+          rainfallMm={rainfallMm}
+          cloggingPercent={cloggingPercent}
+          userLocation={userLocation}
+          onMapClickForBlock={(coords) => {
+            handleSelectCoordsForBlock(coords);
+          }}
+          liveHotspots={liveHotspots}
+          simulationResult={blockSimulationResult}
+          onElevationStatsCalculated={setElevationStats}
+          onMapMoveStart={handleMapMoveStart}
+          onMapIdle={handleMapIdle}
+          mapRefOut={mapRef}
+        />
+      </div>
+
+      {/* 2. Google Maps Collapsible Search Bar (Top-Left) */}
+      <div style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 30, maxWidth: '440px', width: 'calc(100vw - 32px)' }}>
+        <GoogleMapsSearchBar
+          onSelectLocation={(coords, label) => {
+            handleSelectCoordsForBlock(coords, label);
+          }}
+          onLocateMe={handleLocateMe}
+          isSimulateArmed={isSimulateMode}
+          isSimulateMode={isSimulateMode}
+          onToggleSimulate={handleToggleSimulate}
+          isCollapsed={isSearchCollapsed}
+          onExpand={() => setIsSearchCollapsed(false)}
+        />
+      </div>
+
+      {/* 3. Top-Center Live City Assessment Telemetry Pill */}
+      <LiveStatusPill
+        liveSummary={liveSummary}
+        hotspots={liveHotspots}
+        onFlyToHotspot={handleFlyToHotspot}
+        onOpenDevTools={() => setIsDevToolsModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
       />
 
-      {/* Main Workspace Layout */}
-      <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
-        {/* LEFT COLUMN: Input Parameters & AWS Invocation */}
-        <div style={{
-          width: '350px',
-          height: '100%',
-          overflowY: 'auto',
-          zIndex: 20,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-          padding: '12px',
-          background: 'rgba(8, 12, 20, 0.92)',
-          borderRight: '1px solid #1a273e',
-          backdropFilter: 'blur(10px)'
-        }}>
-          {/* Rainfall Intensity */}
-          <div className="command-panel" style={{ padding: '12px' }}>
-            <RainfallControl
-              rainfallMm={rainfallMm}
-              onRainfallChange={setRainfallMm}
-            />
-          </div>
+      {/* 4. Floating 1 km x 1 km Simulation Drawer (Opens upon simulation mode & extraction) */}
+      <SimulationDrawer
+        isOpen={isSimulateMode && !!blockBounds}
+        onClose={() => {
+          setIsSimulateMode(false);
+          setAppMode('live');
+          setBlockBounds(null);
+          setBlockSimulationResult(null);
+          setElevationStats(null);
+        }}
+        blockBounds={blockBounds}
+        blockLabel={blockLabel}
+        rainfallMm={rainfallMm}
+        onRainfallChange={setRainfallMm}
+        cloggingPercent={cloggingPercent}
+        onCloggingChange={setCloggingPercent}
+        elevationStats={elevationStats}
+        onRunSimulation={() => runBlockSimulationInternal(blockBounds, rainfallMm, cloggingPercent)}
+        onTriggerPresetSurge={handleTriggerPresetSurge}
+        isLoading={isSimulating}
+        error={simError}
+        lastSuccessTimestamp={lastSuccessTimestamp}
+        latencyMs={latencyMs}
+        simulationResult={blockSimulationResult}
+      />
 
-          {/* Intervention Selector */}
-          <div className="command-panel" style={{ padding: '12px' }}>
-            <InterventionSelector
-              activeIntervention={intervention}
-              onSelectIntervention={setIntervention}
-            />
-          </div>
-
-          {/* Primary AWS Execution Button */}
-          <div className="command-panel" style={{ padding: '12px' }}>
-            <PrimaryAWSButton
-              onRunSimulation={handleRunSimulation}
-              isLoading={isLoading}
-              error={error}
-              lastSuccessTimestamp={lastSuccessTimestamp}
-              latencyMs={latencyMs}
-              scenarioId={simulationData?.scenario_id}
-            />
-          </div>
-
-          {/* Digital Twin Model Reference Note */}
-          <div style={{ padding: '8px 10px', background: '#070c14', border: '1px solid #142034', fontSize: '10px', color: '#64748b', lineHeight: 1.5 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#94a3b8', fontWeight: 700, marginBottom: '2px' }}>
-              <Info size={12} style={{ color: '#00f0ff' }} />
-              <span>Scientific & Hydrologic Notice:</span>
-            </div>
-            Scenario-based decision support prototype calibrated to Bellandur-ORR basin hypsometry, 80% urban imperviousness, and stormwater channel conveyance.
-          </div>
-        </div>
-
-        {/* CENTER COLUMN: 3D Map Diorama */}
-        <div style={{ flex: 1, height: '100%', position: 'relative' }}>
-          <Map3D
-            mapboxToken={mapboxToken}
-            simulationData={simulationData}
-            infrastructureStatus={infrastructureStatus}
-            focusCoords={focusCoords}
-          />
-        </div>
-
-        {/* RIGHT COLUMN: Analytical Metrics & Infrastructure Impact */}
-        <div style={{
-          width: '360px',
-          height: '100%',
-          overflowY: 'auto',
-          zIndex: 20,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-          padding: '12px',
-          background: 'rgba(8, 12, 20, 0.92)',
-          borderLeft: '1px solid #1a273e',
-          backdropFilter: 'blur(10px)'
-        }}>
-          {/* Before vs After Analytical Panel */}
-          <div className="command-panel" style={{ padding: '12px' }}>
-            <BeforeAfterPanel
-              simulationData={simulationData}
-              activeIntervention={intervention}
-            />
-          </div>
-
-          {/* Infrastructure Matrix */}
-          <div className="command-panel" style={{ padding: '12px' }}>
-            <InfrastructureMatrix
-              infrastructureStatus={infrastructureStatus}
-              onFocusNode={(coords) => setFocusCoords(coords)}
-            />
-          </div>
-
-          {/* Hydrologic Catchment Telemetry */}
-          {simulationData?.hydrologic_metrics && (
-            <div className="command-panel" style={{ padding: '12px' }}>
-              <div className="panel-section-title">
-                <Database size={13} style={{ color: '#00f0ff' }} />
-                <span>Hydrologic Balance Telemetry</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
-                  <span>Catchment Basin Area:</span>
-                  <span className="font-mono" style={{ color: '#f1f5f9' }}>
-                    {simulationData.hydrologic_metrics.catchment_area_sqkm} km²
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
-                  <span>Impervious Surface:</span>
-                  <span className="font-mono" style={{ color: '#f1f5f9' }}>
-                    {(simulationData.hydrologic_metrics.impervious_fraction * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
-                  <span>Gross Storm Runoff:</span>
-                  <span className="font-mono" style={{ color: '#f1f5f9' }}>
-                    {Number(simulationData.hydrologic_metrics.gross_runoff_m3).toLocaleString()} m³
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
-                  <span>Net Surface Ponding:</span>
-                  <span className="font-mono" style={{ color: '#f87171' }}>
-                    {Number(simulationData.hydrologic_metrics.net_accumulated_volume_m3).toLocaleString()} m³
-                  </span>
-                </div>
-                {simulationData.hydrologic_metrics.volume_averted_m3 > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#34d399', paddingTop: '4px', borderTop: '1px solid #1e2c45' }}>
-                    <span>Stormwater Averted:</span>
-                    <span className="font-mono" style={{ fontWeight: 700 }}>
-                      +{Number(simulationData.hydrologic_metrics.volume_averted_m3).toLocaleString()} m³
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* DevTools Judging Guide Modal */}
+      {/* DevTools & Settings Modals */}
       <DevToolsGuideModal
         isOpen={isDevToolsModalOpen}
         onClose={() => setIsDevToolsModalOpen(false)}
         currentEndpoint={awsLambdaUrl}
       />
 
-      {/* Settings Modal */}
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}

@@ -3,21 +3,20 @@
 @tailwind utilities;
 
 :root {
-  --bg-primary: #070b12;
-  --bg-panel: rgba(12, 19, 31, 0.94);
-  --bg-panel-header: #0e1726;
-  --bg-panel-border: #1e2c45;
-  --bg-panel-hover: #15243b;
-  --border-cyan: rgba(0, 240, 255, 0.35);
-  --accent-cyan: #00f0ff;
-  --accent-amber: #f59e0b;
-  --accent-red: #ef4444;
-  --accent-emerald: #10b981;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --bg-dark: #12151c;
+  --surface-dark: #181a20;
+  --surface-card: rgba(24, 26, 32, 0.92);
+  --google-blue: #8ab4f8;
+  --google-green: #34a853;
+  --google-yellow: #fbbc04;
+  --google-red: #ea4335;
+  --neon-cyan: #00f0ff;
+  --text-main: #e8eaed;
+  --text-sub: #9aa0a6;
+  --text-dim: #80868b;
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --font-sans: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
 }
 
 * {
@@ -27,8 +26,8 @@
 }
 
 body {
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
+  background-color: var(--bg-dark);
+  color: var(--text-main);
   font-family: var(--font-sans);
   overflow: hidden;
   height: 100vh;
@@ -36,222 +35,537 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbars */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #090e18;
+  background: rgba(0, 0, 0, 0.2);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e2c45;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #00f0ff;
+  background: var(--google-blue);
 }
 
-/* Monospace numerals & telemetry */
 .font-mono {
   font-family: var(--font-mono);
 }
 
-/* Sharp Command-Center Panel */
-.command-panel {
-  background: var(--bg-panel);
-  border: 1px solid var(--bg-panel-border);
-  backdrop-filter: blur(12px);
-  border-radius: 2px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
+/* =========================================================================
+   GOOGLE MAPS DARK MODE SEARCH BAR
+   ========================================================================= */
+
+.gmaps-search-card {
+  width: 100%;
+  background: var(--surface-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 28px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
 }
 
-.command-panel-header {
-  background: var(--bg-panel-header);
-  border-bottom: 1px solid var(--bg-panel-border);
-  padding: 8px 14px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+.gmaps-search-input-wrapper {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  height: 48px;
+  background: transparent;
+  padding-right: 6px;
 }
 
-.panel-section-title {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #64748b;
-  margin-bottom: 6px;
+.gmaps-search-input {
+  flex: 1;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 13.5px;
+  font-family: inherit;
+  padding: 0 10px;
+}
+.gmaps-search-input::placeholder {
+  color: var(--text-dim);
+}
+
+.gmaps-icon-btn {
+  width: 34px;
+  height: 34px;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.gmaps-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+}
+
+.gmaps-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border-subtle);
+  margin: 0 4px;
+}
+
+/* Dedicated SIMULATE Pill Button */
+.gmaps-simulate-pill-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.gmaps-simulate-pill-btn:hover {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: var(--neon-cyan);
+}
+.gmaps-simulate-pill-btn.active {
+  background: rgba(0, 240, 255, 0.2);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.35);
+}
+
+/* Collapsed Pill on Map Move */
+.gmaps-collapsed-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 24px;
+  background: var(--surface-card);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.gmaps-collapsed-pill:hover {
+  background: rgba(35, 40, 52, 0.95);
+  transform: translateY(-1px);
+}
+
+/* Autocomplete Dropdown */
+.gmaps-autocomplete-dropdown {
+  max-height: 250px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(20, 22, 28, 0.98);
+}
+
+.gmaps-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s;
+}
+.gmaps-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* =========================================================================
+   TOP LIVE TELEMETRY PILL & HOTSPOTS DROPDOWN
+   ========================================================================= */
+
+.gmaps-top-status-container {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
 }
 
-/* Custom Slider */
-input[type="range"] {
+.gmaps-top-telemetry-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 22px;
+  background: var(--surface-card);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.gmaps-pill-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.gmaps-pill-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.gmaps-hotspots-dropdown {
+  width: 360px;
+  background: rgba(20, 24, 32, 0.96);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+  padding: 10px;
+}
+
+.gmaps-hotspot-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background 0.15s;
+}
+.gmaps-hotspot-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* =========================================================================
+   FLOATING 1 KM² SIMULATION DRAWER
+   ========================================================================= */
+
+.gmaps-sim-drawer {
+  position: absolute;
+  bottom: 24px;
+  right: 16px;
+  z-index: 50;
+  pointer-events: auto;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  animation: drawerSlideUp 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes drawerSlideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.gmaps-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.gmaps-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
   height: 6px;
-  background: #141f33;
-  border: 1px solid #1e2c45;
-  border-radius: 0;
+  background: #232936;
+  border-radius: 3px;
   outline: none;
 }
-input[type="range"]::-webkit-slider-thumb {
+.gmaps-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
+  width: 18px;
   height: 18px;
-  background: var(--accent-cyan);
+  border-radius: 50%;
+  background: var(--google-blue);
   cursor: pointer;
-  border: 1px solid #ffffff;
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
-input[type="range"]::-moz-range-thumb {
-  width: 14px;
+.gmaps-slider::-moz-range-thumb {
+  width: 18px;
   height: 18px;
-  background: var(--accent-cyan);
+  border-radius: 50%;
+  background: var(--google-blue);
   cursor: pointer;
-  border: 1px solid #ffffff;
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+  border: 2px solid #ffffff;
 }
 
-/* Primary AWS Button */
-.btn-aws {
-  background: #ff9900;
+.gmaps-primary-aws-btn {
+  width: 100%;
+  height: 42px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #ff9900 0%, #e68a00 100%);
   color: #070b12;
-  font-family: var(--font-sans);
+  font-family: inherit;
   font-weight: 700;
   font-size: 12px;
-  letter-spacing: 0.05em;
-  padding: 12px 16px;
-  border: none;
-  border-radius: 2px;
-  cursor: pointer;
+  letter-spacing: 0.03em;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  cursor: pointer;
   transition: all 0.15s ease-in-out;
-  box-shadow: 0 0 18px rgba(255, 153, 0, 0.35);
+  box-shadow: 0 0 16px rgba(255, 153, 0, 0.35);
   text-transform: uppercase;
 }
-.btn-aws:hover:not(:disabled) {
+.gmaps-primary-aws-btn:hover:not(:disabled) {
   background: #ffac33;
-  box-shadow: 0 0 25px rgba(255, 153, 0, 0.55);
+  box-shadow: 0 0 22px rgba(255, 153, 0, 0.55);
 }
-.btn-aws:disabled {
+.gmaps-primary-aws-btn:disabled {
   background: #473215;
   color: #8c7353;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
-/* Secondary Button */
-.btn-secondary {
-  background: #101a2b;
-  color: #94a3b8;
-  border: 1px solid #1e2c45;
-  padding: 7px 12px;
+.gmaps-demo-surge-btn {
+  width: 100%;
+  height: 36px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 172, 51, 0.45);
+  background: linear-gradient(135deg, rgba(255, 153, 0, 0.18) 0%, rgba(234, 67, 53, 0.22) 100%);
+  color: #ffbe53;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.gmaps-demo-surge-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(255, 153, 0, 0.28) 0%, rgba(234, 67, 53, 0.35) 100%);
+  border-color: #ffac33;
+  color: #ffffff;
+}
+
+.gmaps-weather-btn {
+  width: 100%;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid rgba(138, 180, 248, 0.3);
+  background: rgba(138, 180, 248, 0.08);
+  color: var(--google-blue);
   font-size: 11px;
   font-weight: 600;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.15s ease;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.btn-secondary:hover:not(:disabled) {
-  background: #182842;
-  color: #f1f5f9;
-  border-color: var(--accent-cyan);
+.gmaps-weather-btn:hover:not(:disabled) {
+  background: rgba(138, 180, 248, 0.16);
 }
 
-/* Radio Card for Interventions */
-.intervention-card {
-  border: 1px solid #1a273e;
-  background: #0b121e;
-  padding: 10px 12px;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.15s ease;
+/* =========================================================================
+   FLOATING TOOLS & HINTS
+   ========================================================================= */
+
+.gmaps-floating-tools {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-.intervention-card:hover {
-  border-color: #2b3d60;
-  background: #0f192b;
-}
-.intervention-card.active {
-  border-color: var(--accent-cyan);
-  background: rgba(0, 240, 255, 0.07);
-  box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.08);
+  gap: 6px;
 }
 
-/* Custom 3D Map Markers */
+.gmaps-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  backdrop-filter: blur(14px);
+  color: var(--text-main);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: all 0.15s;
+}
+.gmaps-tool-btn:hover {
+  background: rgba(41, 49, 66, 0.98);
+}
+.gmaps-tool-btn.active {
+  border-color: var(--google-blue);
+  color: #ffffff;
+}
+
+.gmaps-armed-hint-banner {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(18, 24, 36, 0.96);
+  border: 1px solid var(--neon-cyan);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.25);
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.gmaps-error-banner {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(234, 67, 53, 0.95);
+  color: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  max-width: 500px;
+}
+
+/* 3D Infrastructure Markers */
 .mapbox-custom-marker {
   cursor: pointer;
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.mapbox-custom-marker:hover {
-  transform: scale(1.08) translateY(-4px);
-  z-index: 50;
+  user-select: none;
 }
 
 .marker-pin {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-size: 10px;
+  padding: 5px 10px;
+  border-radius: 16px;
+  font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.8);
-  border: 1px solid;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  transition: all 0.2s ease;
 }
-
 .marker-pin.operational {
-  background: rgba(6, 44, 28, 0.95);
-  border-color: #10b981;
-  color: #34d399;
+  background: rgba(14, 25, 18, 0.95);
+  border: 1.5px solid var(--google-green);
+  color: #ffffff;
 }
 .marker-pin.flooded {
-  background: rgba(54, 11, 14, 0.95);
-  border-color: #ef4444;
-  color: #f87171;
+  background: rgba(35, 10, 10, 0.95);
+  border: 1.5px solid var(--google-red);
+  color: #ffffff;
 }
 
 .pulse-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  margin-right: 6px;
+  animation: pulse-ring 2s infinite ease-in-out;
 }
 .pulse-dot.operational {
-  background: #10b981;
-  box-shadow: 0 0 10px #10b981;
+  background: var(--google-green);
 }
 .pulse-dot.flooded {
-  background: #ef4444;
-  box-shadow: 0 0 10px #ef4444;
+  background: var(--google-red);
 }
 
-/* Modal backdrop */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(3, 7, 18, 0.85);
-  backdrop-filter: blur(6px);
-  z-index: 100;
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.4); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.8; }
+}
+
+/* =========================================================================
+   LOCATE ME PINPOINT MARKER
+   ========================================================================= */
+
+.gmaps-locate-pin-container {
+  position: relative;
+  width: 32px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
 }
+
+.gmaps-locate-pulse-halo {
+  position: absolute;
+  bottom: 0px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(26, 115, 232, 0.28);
+  border: 1.5px solid rgba(66, 133, 244, 0.75);
+  animation: locateHaloPulse 2s infinite ease-out;
+  pointer-events: none;
+}
+
+@keyframes locateHaloPulse {
+  0% { transform: translateX(-50%) scale(0.5); opacity: 1; }
+  100% { transform: translateX(-50%) scale(1.6); opacity: 0; }
+}
+
+.gmaps-locate-pin {
+  position: relative;
+  z-index: 2;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.65));
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.gmaps-locate-pin:hover {
+  transform: scale(1.15) translateY(-2px);
+}
+

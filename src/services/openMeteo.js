@@ -1,66 +1,82 @@
 // 4clique Open-Meteo Weather Service
-// Coordinates: Bellandur-ORR, Bengaluru (Lat: 12.935, Lng: 77.680)
+// Supports city-wide multi-point rain grid query & single point query
 
 const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
-const BENGALURU_COORDS = {
-  latitude: 12.935,
-  longitude: 77.680
-};
 
 /**
- * Fetches real-time / near-term hourly precipitation data for Bengaluru.
- * Clamps result between 0 and 300 mm.
+ * Fetches real-time precipitation for a 5x5 grid across Bengaluru in a single batch request.
+ * @param {Array<{id: string, lat: number, lng: number}>} gridPoints
  */
-export async function fetchLiveBengaluruRain() {
-  const params = new URLSearchParams({
-    latitude: BENGALURU_COORDS.latitude.toString(),
-    longitude: BENGALURU_COORDS.longitude.toString(),
-    current: 'precipitation,rain,weather_code',
-    hourly: 'precipitation,rain',
-    forecast_days: '1',
-    timezone: 'Asia/Kolkata'
-  });
+export async function fetchCityRainGrid(gridPoints) {
+  if (!gridPoints || gridPoints.length === 0) return [];
 
-  const url = `${OPEN_METEO_URL}?${params.toString()}`;
+  const latList = gridPoints.map(p => p.lat.toFixed(3)).join(',');
+  const lngList = gridPoints.map(p => p.lng.toFixed(3)).join(',');
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Accept': 'application/json'
+  const url = `${OPEN_METEO_URL}?latitude=${latList}&longitude=${lngList}&current=precipitation,rain&timezone=Asia/Kolkata`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Open-Meteo batch HTTP ${res.status}`);
     }
-  });
+    const data = await res.json();
 
-  if (!response.ok) {
-    throw new Error(`Open-Meteo API error: HTTP ${response.status} (${response.statusText})`);
+    // Open-Meteo returns an Array when multiple coordinates are requested
+    if (Array.isArray(data)) {
+      return data.map((item, idx) => {
+        const rain = item?.current?.precipitation ?? item?.current?.rain ?? 0.0;
+        return {
+          id: gridPoints[idx]?.id || `pt_${idx}`,
+          lat: gridPoints[idx]?.lat,
+          lng: gridPoints[idx]?.lng,
+          rain_mm_hr: Math.max(0, Number(rain.toFixed(1)))
+        };
+      });
+    } else if (data && data.current) {
+      // Single response fallback
+      const rain = data.current.precipitation ?? data.current.rain ?? 0.0;
+      return [{
+        id: gridPoints[0]?.id || 'pt_0',
+        lat: gridPoints[0]?.lat,
+        lng: gridPoints[0]?.lng,
+        rain_mm_hr: Math.max(0, Number(rain.toFixed(1)))
+      }];
+    }
+    return [];
+  } catch (err) {
+    console.warn("City rain grid fetch fallback:", err.message);
+    // Return dry baseline on network failure
+    return gridPoints.map(p => ({
+      id: p.id,
+      lat: p.lat,
+      lng: p.lng,
+      rain_mm_hr: 0.0
+    }));
   }
+}
 
-  const data = await response.json();
+/**
+ * Fetches point precipitation for a specific coordinate (e.g., active block center).
+ */
+export async function fetchPointRain(lat, lng) {
+  const url = `${OPEN_METEO_URL}?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=precipitation,rain&timezone=Asia/Kolkata`;
 
-  // Extract current precipitation or maximum hourly precipitation in the current cycle
-  let rawPrecipitation = 0.0;
-  if (data.current && typeof data.current.precipitation === 'number') {
-    rawPrecipitation = data.current.precipitation;
-  } else if (data.hourly && Array.isArray(data.hourly.precipitation) && data.hourly.precipitation.length > 0) {
-    // Current hour index
-    const currentHourIndex = new Date().getHours();
-    rawPrecipitation = data.hourly.precipitation[currentHourIndex] || 0.0;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
+    const data = await res.json();
+    const rain = data?.current?.precipitation ?? data?.current?.rain ?? 0.0;
+    return {
+      rain_mm_hr: Math.max(0, Number(rain.toFixed(1))),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+  } catch (err) {
+    console.warn("Point rain fetch error:", err.message);
+    return {
+      rain_mm_hr: 0.0,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      fallback: true
+    };
   }
-
-  // Convert to storm scenario equivalent (hourly rate extrapolated to design storm depth or scaled)
-  // If dry (0 mm), return 0 mm with appropriate metadata
-  let calculatedScenarioRainfall = Math.round(rawPrecipitation * 8.0); // 8-hour storm accumulation equivalent
-  if (rawPrecipitation > 0 && calculatedScenarioRainfall < 15) {
-    calculatedScenarioRainfall = 25; // Minimum perceptible shower scenario
-  }
-
-  // Clamp between 0 and 300 mm
-  const clampedMm = Math.min(300, Math.max(0, calculatedScenarioRainfall));
-
-  return {
-    rawCurrentPrecipitationMm: rawPrecipitation,
-    scenarioRainfallMm: clampedMm,
-    weatherCode: data.current?.weather_code ?? 0,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    source: 'Open-Meteo WMO Station 12.935N, 77.680E'
-  };
 }

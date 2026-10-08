@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
-import { CloudRain, Radio, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { CloudRain, Radio, RefreshCw, AlertCircle, CheckCircle2, Zap, Waves } from 'lucide-react';
 import { fetchLiveBengaluruRain } from '../services/openMeteo';
 
-export function RainfallControl({ rainfallMm, onRainfallChange }) {
+export function RainfallControl({
+  rainfallMm,
+  onRainfallChange,
+  onTriggerDemoSurge
+}) {
   const [isFetchingLive, setIsFetchingLive] = useState(false);
-  const [liveStatus, setLiveStatus] = useState(null); // { type: 'success'|'error', text: '', time: '' }
+  const [liveStatus, setLiveStatus] = useState(null);
 
   const handleFetchLiveRain = async () => {
     setIsFetchingLive(true);
@@ -12,11 +16,20 @@ export function RainfallControl({ rainfallMm, onRainfallChange }) {
     try {
       const data = await fetchLiveBengaluruRain();
       onRainfallChange(data.scenarioRainfallMm);
-      setLiveStatus({
-        type: 'success',
-        text: `Open-Meteo Live: ${data.rawCurrentPrecipitationMm} mm/h (Scenario: ${data.scenarioRainfallMm} mm)`,
-        time: data.timestamp
-      });
+
+      if (data.scenarioRainfallMm === 0) {
+        setLiveStatus({
+          type: 'success',
+          text: 'Open-Meteo: 0 mm/h. Drainage flowing normally (No Inundation).',
+          time: data.timestamp
+        });
+      } else {
+        setLiveStatus({
+          type: 'success',
+          text: `Open-Meteo: ${data.rawCurrentPrecipitationMm} mm/h (Extrapolated: ${data.scenarioRainfallMm} mm/h)`,
+          time: data.timestamp
+        });
+      }
     } catch (err) {
       console.warn("Failed to fetch live rain from Open-Meteo:", err);
       setLiveStatus({
@@ -29,28 +42,34 @@ export function RainfallControl({ rainfallMm, onRainfallChange }) {
     }
   };
 
-  const handlePreset = (val) => {
-    onRainfallChange(val);
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div className="panel-section-title">
-        <CloudRain size={13} style={{ color: '#00f0ff' }} />
-        <span>Rainfall Intensity Control</span>
-      </div>
+      {/* Prominent Quick-Test Demo Simulation Button */}
+      {onTriggerDemoSurge && (
+        <button
+          onClick={onTriggerDemoSurge}
+          className="gmaps-demo-surge-btn"
+          title="Simulate 145 mm/hr cloudburst with 80% clogged Rajakaluves"
+        >
+          <Zap size={16} style={{ color: '#ffac33' }} />
+          <span>Simulate Extreme Monsoon Surge (Demo)</span>
+        </button>
+      )}
 
       {/* Main Slider Section */}
-      <div style={{ background: '#090e18', border: '1px solid #16233b', padding: '12px 14px' }}>
+      <div style={{ background: '#090e18', border: '1px solid #16233b', padding: '12px 14px', borderRadius: '8px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em' }}>
-            PRECIPITATION DEPTH
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <CloudRain size={15} style={{ color: '#8ab4f8' }} />
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em' }}>
+              RAINFALL INTENSITY
+            </span>
+          </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-            <span className="font-mono" style={{ fontSize: '22px', fontWeight: 800, color: '#00f0ff' }}>
+            <span className="font-mono" style={{ fontSize: '20px', fontWeight: 800, color: '#8ab4f8' }}>
               {rainfallMm}
             </span>
-            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>mm</span>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>mm/hr</span>
           </div>
         </div>
 
@@ -62,33 +81,34 @@ export function RainfallControl({ rainfallMm, onRainfallChange }) {
           step="5"
           value={rainfallMm}
           onChange={(e) => onRainfallChange(parseInt(e.target.value, 10))}
-          style={{ width: '100%', cursor: 'pointer' }}
+          className="gmaps-slider"
         />
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#475569', marginTop: '6px' }} className="font-mono">
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#80868b', marginTop: '6px' }}>
           <span>0 mm (Dry)</span>
-          <span>100 mm</span>
-          <span>180 mm (Deluge)</span>
+          <span>75 mm (Heavy)</span>
+          <span>145 mm (Surge)</span>
           <span>300 mm (Max)</span>
         </div>
 
-        {/* Storm Intensity Category Tag */}
+        {/* Drainage / Inundation Condition Label */}
         <div style={{
           marginTop: '10px',
-          padding: '4px 8px',
-          background: rainfallMm < 50 ? 'rgba(0, 240, 255, 0.08)' : (rainfallMm <= 150 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.12)'),
-          border: `1px solid ${rainfallMm < 50 ? '#00f0ff40' : (rainfallMm <= 150 ? '#f59e0b40' : '#ef444450')}`,
-          fontSize: '10px',
+          padding: '6px 10px',
+          borderRadius: '6px',
+          background: rainfallMm === 0 ? 'rgba(52, 168, 83, 0.12)' : (rainfallMm <= 75 ? 'rgba(138, 180, 248, 0.1)' : 'rgba(234, 67, 53, 0.15)'),
+          border: `1px solid ${rainfallMm === 0 ? '#34a85350' : (rainfallMm <= 75 ? '#8ab4f840' : '#ea433550')}`,
+          fontSize: '11px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <span style={{ color: '#94a3b8', fontWeight: 600 }}>Category:</span>
-          <span className="font-mono" style={{
+          <span style={{ color: '#9aa0a6', fontWeight: 600 }}>Drainage Condition:</span>
+          <span style={{
             fontWeight: 700,
-            color: rainfallMm < 50 ? '#38bdf8' : (rainfallMm <= 150 ? '#fbbf24' : '#f87171')
+            color: rainfallMm === 0 ? '#81c995' : (rainfallMm <= 75 ? '#8ab4f8' : '#f28b82')
           }}>
-            {rainfallMm === 0 ? 'DRY WEATHER' : (rainfallMm < 50 ? 'LIGHT / MODERATE SHOWER' : (rainfallMm <= 150 ? 'HEAVY MONSOON STORM' : 'EXTREME CLOUDBURST DELUGE'))}
+            {rainfallMm === 0 ? 'Drainage flowing normally (No Inundation)' : (rainfallMm <= 75 ? 'Moderate Surface Runoff' : 'Extreme Surge / Depression Filling')}
           </span>
         </div>
       </div>
@@ -98,30 +118,22 @@ export function RainfallControl({ rainfallMm, onRainfallChange }) {
         <button
           onClick={handleFetchLiveRain}
           disabled={isFetchingLive}
-          className="btn-secondary"
-          style={{
-            width: '100%',
-            justifyContent: 'center',
-            padding: '9px 12px',
-            borderColor: '#2b3f63',
-            background: '#0d1726'
-          }}
+          className="gmaps-weather-btn"
+          title="Fetch live rainfall from Open-Meteo"
         >
           {isFetchingLive ? (
-            <RefreshCw size={13} className="animate-spin" style={{ color: '#00f0ff' }} />
+            <RefreshCw size={14} className="animate-spin" style={{ color: '#8ab4f8' }} />
           ) : (
-            <Radio size={13} style={{ color: '#00f0ff' }} />
+            <Radio size={14} style={{ color: '#8ab4f8' }} />
           )}
-          <span style={{ color: '#e2e8f0', letterSpacing: '0.04em' }}>
-            {isFetchingLive ? 'CONNECTING OPEN-METEO...' : 'FETCH LIVE BENGALURU RAIN'}
-          </span>
+          <span>{isFetchingLive ? 'CONNECTING OPEN-METEO...' : 'SYNC LIVE BENGALURU WEATHER'}</span>
         </button>
 
-        {/* Live Weather Status Indicator */}
         {liveStatus && (
           <div style={{
             marginTop: '6px',
             padding: '6px 8px',
+            borderRadius: '6px',
             fontSize: '10px',
             background: liveStatus.type === 'success' ? '#062017' : '#260b0e',
             border: `1px solid ${liveStatus.type === 'success' ? '#10b981' : '#ef4444'}`,
@@ -135,39 +147,6 @@ export function RainfallControl({ rainfallMm, onRainfallChange }) {
             <span className="font-mono" style={{ color: '#64748b' }}>{liveStatus.time}</span>
           </div>
         )}
-      </div>
-
-      {/* Reference Scenario Presets */}
-      <div>
-        <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '6px' }}>
-          HISTORICAL / DESIGN BENCHMARKS:
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-          <button
-            onClick={() => handlePreset(65)}
-            className="btn-secondary font-mono"
-            style={{ padding: '4px 6px', fontSize: '10px', justifyContent: 'center' }}
-            title="Substation threshold breach"
-          >
-            65 mm (KPTCL)
-          </button>
-          <button
-            onClick={() => handlePreset(110)}
-            className="btn-secondary font-mono"
-            style={{ padding: '4px 6px', fontSize: '10px', justifyContent: 'center' }}
-            title="Ecospace ORR breach"
-          >
-            110 mm (ORR)
-          </button>
-          <button
-            onClick={() => handlePreset(180)}
-            className="btn-secondary font-mono"
-            style={{ padding: '4px 6px', fontSize: '10px', justifyContent: 'center', borderColor: '#38bdf8' }}
-            title="Bengaluru 2022 Deluge benchmark"
-          >
-            180 mm (2022)
-          </button>
-        </div>
       </div>
     </div>
   );
