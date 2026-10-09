@@ -27,10 +27,10 @@ import {
  * - Severe Waterlogging / Critical Inundation (Depth >= 0.6 m): #ef4444 (Red)
  */
 function getWaterloggingColor(depthMeters) {
-  if (depthMeters >= 0.6) return '#ef4444'; // Red
-  if (depthMeters >= 0.3) return '#f97316'; // Orange
-  if (depthMeters > 0)    return '#eab308'; // Yellow
-  return '#1f242d';                         // Normal Dark Charcoal Grey
+  if (depthMeters >= 0.6) return '#ef4444'; // Red (High Risk / Critical low-lying ponding)
+  if (depthMeters >= 0.3) return '#f97316'; // Amber/Orange (Moderate Risk)
+  if (depthMeters >= 0.08) return '#eab308'; // Soft Yellow (Low Risk / Minor clogging / Higher ground)
+  return '#1f242d';                         // Safe / Unflooded (Default dark structural charcoal)
 }
 
 function getCompassHeadingLabel(deg) {
@@ -691,19 +691,24 @@ export function Map3D({
 
     const handleMouseMove = (e) => {
       if (!isDragging360Ref.current) return;
-      const dx = e.clientX - lastPointerPosRef.current.x;
-      const dy = e.clientY - lastPointerPosRef.current.y;
+      // Clamp delta coordinates to prevent sudden jump/momentum spikes
+      const rawDx = e.clientX - lastPointerPosRef.current.x;
+      const rawDy = e.clientY - lastPointerPosRef.current.y;
       lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+
+      const dx = Math.max(-30, Math.min(30, rawDx));
+      const dy = Math.max(-30, Math.min(30, rawDy));
 
       const sensitivity = 0.22; // Degrees per pixel
       targetYawRef.current = (targetYawRef.current + dx * sensitivity) % 360;
       if (targetYawRef.current < 0) targetYawRef.current += 360;
 
-      // Vertical drag Y-axis controls Pitch (clamped between 5° and 85° to prevent flipping)
-      targetPitchRef.current = Math.max(5, Math.min(85, targetPitchRef.current - dy * sensitivity));
+      // Vertical drag Y-axis controls Pitch (clamped strictly between 10° and 80° to prevent flipping)
+      targetPitchRef.current = Math.max(10, Math.min(80, targetPitchRef.current - dy * sensitivity));
 
-      velYawRef.current = dx * sensitivity;
-      velPitchRef.current = -dy * sensitivity;
+      // Damped momentum tracking for smooth release without rapid spinning
+      velYawRef.current = Math.max(-2.5, Math.min(2.5, dx * sensitivity * 0.4));
+      velPitchRef.current = Math.max(-2.0, Math.min(2.0, -dy * sensitivity * 0.4));
     };
 
     const handleMouseUp = () => {
@@ -720,17 +725,20 @@ export function Map3D({
 
     const handleTouchMove = (e) => {
       if (!isDragging360Ref.current || e.touches.length !== 1) return;
-      const dx = e.touches[0].clientX - lastPointerPosRef.current.x;
-      const dy = e.touches[0].clientY - lastPointerPosRef.current.y;
+      const rawDx = e.touches[0].clientX - lastPointerPosRef.current.x;
+      const rawDy = e.touches[0].clientY - lastPointerPosRef.current.y;
       lastPointerPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 
-      const sensitivity = 0.28;
+      const dx = Math.max(-30, Math.min(30, rawDx));
+      const dy = Math.max(-30, Math.min(30, rawDy));
+
+      const sensitivity = 0.25;
       targetYawRef.current = (targetYawRef.current + dx * sensitivity) % 360;
       if (targetYawRef.current < 0) targetYawRef.current += 360;
-      targetPitchRef.current = Math.max(5, Math.min(85, targetPitchRef.current - dy * sensitivity));
+      targetPitchRef.current = Math.max(10, Math.min(80, targetPitchRef.current - dy * sensitivity));
 
-      velYawRef.current = dx * sensitivity;
-      velPitchRef.current = -dy * sensitivity;
+      velYawRef.current = Math.max(-2.5, Math.min(2.5, dx * sensitivity * 0.4));
+      velPitchRef.current = Math.max(-2.0, Math.min(2.0, -dy * sensitivity * 0.4));
     };
 
     const handleTouchEnd = () => {
@@ -751,21 +759,28 @@ export function Map3D({
 
       if (!isDragging360Ref.current) {
         if (is360AutoPanningRef.current) {
-          targetYawRef.current = (targetYawRef.current + 0.2) % 360;
+          targetYawRef.current = (targetYawRef.current + 0.15) % 360;
         } else {
-          // Inertia decay
-          velYawRef.current *= 0.88;
-          velPitchRef.current *= 0.88;
+          // Rapid momentum damping decay
+          velYawRef.current *= 0.72;
+          velPitchRef.current *= 0.72;
+          if (Math.abs(velYawRef.current) < 0.01) velYawRef.current = 0;
+          if (Math.abs(velPitchRef.current) < 0.01) velPitchRef.current = 0;
+
           targetYawRef.current = (targetYawRef.current + velYawRef.current) % 360;
           if (targetYawRef.current < 0) targetYawRef.current += 360;
-          targetPitchRef.current = Math.max(5, Math.min(85, targetPitchRef.current + velPitchRef.current));
+          targetPitchRef.current = Math.max(10, Math.min(80, targetPitchRef.current + velPitchRef.current));
         }
       }
 
-      // Smooth damping interpolation
-      const damping = 0.18;
-      currentYawRef.current += (targetYawRef.current - currentYawRef.current) * damping;
+      // Shortest angular difference calculation prevents rapid wrap-around spinning:
+      let diffYaw = ((targetYawRef.current - currentYawRef.current + 540) % 360) - 180;
+      const damping = isDragging360Ref.current ? 0.35 : 0.22;
+      currentYawRef.current = (currentYawRef.current + diffYaw * damping) % 360;
+      if (currentYawRef.current < 0) currentYawRef.current += 360;
+
       currentPitchRef.current += (targetPitchRef.current - currentPitchRef.current) * damping;
+      currentPitchRef.current = Math.max(10, Math.min(80, currentPitchRef.current));
 
       map.setBearing(currentYawRef.current);
       map.setPitch(currentPitchRef.current);
@@ -816,13 +831,38 @@ export function Map3D({
     if (!mapRef.current || !mapLoaded) return;
     const map = mapRef.current;
 
-    const isSimActive = (mode === 'block' || isSimulateMode) && blockBounds;
+    const hasBounds = (mode === 'block' || isSimulateMode) && blockBounds;
     const waterSrc = map.getSource('water-flood-source');
     const fldSrc = map.getSource('flooded-buildings-source');
 
-    if (!isSimActive) {
+    if (!hasBounds) {
       if (waterSrc) waterSrc.setData({ type: 'FeatureCollection', features: [] });
       if (fldSrc) fldSrc.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    // Decoupled Simulation Check: If simulation has not been triggered, keep water & flood mesh empty
+    const isSimRunning = isSimulateMode;
+    if (!isSimRunning) {
+      if (waterSrc) waterSrc.setData({ type: 'FeatureCollection', features: [] });
+      if (fldSrc) fldSrc.setData({ type: 'FeatureCollection', features: [] });
+
+      // Still calculate area-specific RWH potential for the selected block
+      try {
+        const buildingLayers = ['3d-buildings', 'building-extrusion'].filter(l => map.getLayer(l));
+        const renderedBuildings = buildingLayers.length > 0 ? map.queryRenderedFeatures({ layers: buildingLayers }) : [];
+        if (onBlockRwhCalculated) {
+          const rwhData = calculateBlockRWH({
+            blockBounds,
+            blockLabel,
+            rainfallMm,
+            renderedBuildings
+          });
+          onBlockRwhCalculated(rwhData);
+        }
+      } catch (e) {
+        // ignore
+      }
       return;
     }
 
@@ -833,7 +873,7 @@ export function Map3D({
         waterSrc.setData(activeStep.waterGeoJSON);
       }
 
-      // Transition building colors dynamically per 24h step
+      // Granular Per-Building Severity Color Mapping across the 24h window
       if (fldSrc) {
         try {
           const buildingLayers = ['3d-buildings', 'building-extrusion'].filter(l => map.getLayer(l));
@@ -841,6 +881,17 @@ export function Map3D({
           const { minLng, minLat, maxLng, maxLat } = blockBounds;
           const seenCenters = new Set();
           const floodedFeatures = [];
+
+          // Elevation extents for localized building depth
+          const minElev = sim24Sequence.minElevation || 880;
+          const maxElev = sim24Sequence.maxElevation || 895;
+          const elevRange = Math.max(3.0, maxElev - minElev);
+          const clogRatio = Math.max(0, Math.min(100, cloggingPercent || 0)) / 100;
+
+          // Dynamic flood reach threshold expanding up terrain gradient with runoff depth
+          const floodReachThreshold = activeStep.peakWaterDepthM > 0.02
+            ? Math.min(0.92, 0.20 + (activeStep.peakWaterDepthM / 2.2) * 0.42 + clogRatio * 0.28)
+            : 0;
 
           renderedBuildings.forEach((building) => {
             let center = null;
@@ -863,9 +914,30 @@ export function Map3D({
             if (seenCenters.has(cKey)) return;
             seenCenters.add(cKey);
 
-            const depthAtBldg = activeStep.peakWaterDepthM > 0.05
-              ? Number((activeStep.peakWaterDepthM * 0.85).toFixed(2))
-              : 0;
+            // Derive localized ground elevation
+            let bldgElev = null;
+            if (typeof map.queryTerrainElevation === 'function') {
+              bldgElev = map.queryTerrainElevation(center);
+            }
+            if (bldgElev === null || isNaN(bldgElev)) {
+              const relX = (bLng - minLng) / (maxLng - minLng);
+              const relY = (bLat - minLat) / (maxLat - minLat);
+              bldgElev = minElev + (relX * 0.35 + relY * 0.65) * elevRange;
+            }
+
+            const relElev = Math.max(0, Math.min(1, (bldgElev - minElev) / elevRange));
+            let depthAtBldg = 0;
+
+            if (activeStep.peakWaterDepthM > 0.02 && relElev <= floodReachThreshold) {
+              const depressionFactor = Math.max(0, 1.0 - (relElev / floodReachThreshold));
+              depthAtBldg = Number((activeStep.peakWaterDepthM * (0.12 + 0.88 * Math.pow(depressionFactor, 1.3))).toFixed(2));
+            }
+
+            // Map color strictly based on localized depth:
+            // >= 0.6m -> Red (#ef4444)
+            // >= 0.3m -> Orange (#f97316)
+            // >= 0.08m -> Soft Yellow (#eab308)
+            // < 0.08m -> Safe Charcoal (#1f242d)
             const renderColor = getWaterloggingColor(depthAtBldg);
 
             floodedFeatures.push({

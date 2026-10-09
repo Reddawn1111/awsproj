@@ -8,6 +8,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ReportModal } from './components/ReportModal';
 import { RainwaterHarvestModal } from './components/RainwaterHarvestModal';
 import { DemoPresetModal } from './components/DemoPresetModal';
+import { SimulationPlaybackDock } from './components/SimulationPlaybackDock';
 import { BENGALURU_HOTSPOTS, getBengaluruRainGridPoints, matchNearestRain } from './config/bengaluruHotspots';
 import { fetchCityRainGrid } from './services/openMeteo';
 import { runAwsBlockSimulation, runAwsLiveAssessment } from './services/awsSimulation';
@@ -182,16 +183,27 @@ export function App() {
     }
   };
 
-  // 3. Toggle "SIMULATE" Mode: Shares isSimulateMode across search bar, map, and drawer
+  // 3. Toggle "SIMULATE" Mode: Decoupled Simulation Trigger
+  // Simulation initializes and starts playback automatically ONLY when "SIMULATE" button is clicked
   const handleToggleSimulate = () => {
     if (!isSimulateMode) {
       setIsSimulateMode(true);
       setAppMode('block');
-      // If no block selected yet, auto-select a 1 km x 1 km block around current map center or Bellandur
-      const center = mapRef.current ? mapRef.current.getCenter() : { lng: 77.6805, lat: 12.9352 };
-      handleSelectCoordsForBlock([center.lng, center.lat], 'Bengaluru Simulation Zone');
+
+      let targetBounds = blockBounds;
+      if (!targetBounds) {
+        // If no block selected yet, auto-select a 1 km x 1 km block around current map center or Bellandur
+        const center = mapRef.current ? mapRef.current.getCenter() : { lng: 77.6805, lat: 12.9352 };
+        targetBounds = calculateSquareBounds(center.lng, center.lat);
+        setBlockBounds(targetBounds);
+        setBlockLabel('Bengaluru Simulation Zone');
+      }
+
+      // Explicitly initialize simulation and auto-play 24h timeline
+      runBlockSimulationInternal(targetBounds, rainfallMm, cloggingPercent);
+      init24HourSimulation(targetBounds, rainfallMm, cloggingPercent);
     } else {
-      // Return to live city mode & clear simulation block
+      // Exit simulation mode & clear active simulation state
       setIsSimulateMode(false);
       setAppMode('live');
       setBlockBounds(null);
@@ -204,12 +216,20 @@ export function App() {
     }
   };
 
-  // 4. Extract 1 km x 1 km Block on Coordinate Selection (Search result or map click)
+  // 4. Area / Block Selection on Coordinate Selection (Search result or map click)
+  // Decoupled: ONLY highlights the boundary outline as active. Does NOT auto-run simulation.
   const handleSelectCoordsForBlock = async ([lng, lat], label = null) => {
-    setIsSimulateMode(true);
-    setAppMode('block');
     const bounds = calculateSquareBounds(lng, lat);
     setBlockBounds(bounds);
+    setAppMode('block');
+
+    // Reset previous simulation run state so boundary is active without immediately running simulation
+    setBlockSimulationResult(null);
+    setIs24SimActive(false);
+    setIs24SimPlaying(false);
+    setSim24Sequence(null);
+    setCurrentSimHour(0);
+    setIsSimulateMode(false);
 
     // Smoothly fly camera to focus on extracted block
     if (mapRef.current) {
@@ -228,12 +248,6 @@ export function App() {
     } else {
       reverseLocationIQ(lat, lng).then(r => setBlockLabel(r.primaryName));
     }
-
-    // Auto-trigger block simulation and 24-hour sequence with current parameters
-    setTimeout(() => {
-      runBlockSimulationInternal(bounds, rainfallMm, cloggingPercent);
-      init24HourSimulation(bounds, rainfallMm, cloggingPercent);
-    }, 400);
   };
 
   // 5. Run 1km Block Hydrologic Simulation
@@ -485,6 +499,20 @@ export function App() {
         onStart24Simulation={() => {
           if (blockBounds) init24HourSimulation(blockBounds, rainfallMm, cloggingPercent);
         }}
+      />
+
+      {/* 4b. Floating Simulation Playback Dock Anchored at Bottom-Center */}
+      <SimulationPlaybackDock
+        isActive={is24SimActive}
+        isPlaying={is24SimPlaying}
+        currentHour={currentSimHour}
+        simSequence={sim24Sequence}
+        onTogglePlay={() => setIs24SimPlaying(prev => !prev)}
+        onReset={() => {
+          setCurrentSimHour(0);
+          setIs24SimPlaying(false);
+        }}
+        onHourChange={(newHour) => setCurrentSimHour(newHour)}
       />
 
       {/* 5. Citizen & Municipal Drainage Report Override Modal */}

@@ -294,24 +294,33 @@ export function GoogleMapsSearchBar({
       </div>
 
       {/* 2. SECONDARY SUB-BAR (COLLAPSIBLE UTILITY RIBBON) */}
+      {/* 2. SECONDARY SUB-BAR (COLLAPSIBLE VERTICAL ACTION MENU) */}
       {showRibbon ? (
         <div
           className="gmaps-utility-ribbon"
           style={{
             display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '5px 8px',
-            background: 'rgba(20, 23, 30, 0.92)',
-            backdropFilter: 'blur(10px)',
-            borderRadius: '10px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
-            overflowX: 'auto',
+            flexDirection: 'column',
+            gap: '4px',
+            padding: '8px',
+            background: 'rgba(18, 22, 30, 0.95)',
+            backdropFilter: 'blur(16px)',
+            borderRadius: '12px',
+            border: '1px solid rgba(255, 255, 255, 0.09)',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.55), 0 0 1px rgba(0, 240, 255, 0.2)',
+            width: '100%',
+            maxWidth: '320px',
             animation: 'fadeInSlideDown 0.2s ease-out'
           }}
         >
-          {/* Button 1: Rainwater Harvest */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px 4px 6px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', marginBottom: '2px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Digital Twin Quick Actions
+            </span>
+            <span style={{ fontSize: '9.5px', color: '#64748b' }}>Primary Controls</span>
+          </div>
+
+          {/* Action 1: Rainwater Harvesting Potential */}
           <button
             onClick={isRWHAvailable ? onOpenRWH : null}
             disabled={!isRWHAvailable}
@@ -319,120 +328,184 @@ export function GoogleMapsSearchBar({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '6px 10px',
-              borderRadius: '7px',
-              border: `1px solid ${isRWHAvailable ? 'rgba(0, 240, 255, 0.25)' : 'rgba(255, 255, 255, 0.05)'}`,
-              background: isRWHAvailable ? 'rgba(0, 240, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: '8px',
+              border: `1px solid ${isRWHAvailable ? 'rgba(0, 240, 255, 0.2)' : 'rgba(255, 255, 255, 0.05)'}`,
+              background: isRWHAvailable ? 'rgba(0, 240, 255, 0.06)' : 'rgba(255, 255, 255, 0.02)',
               color: isRWHAvailable ? '#38bdf8' : '#64748b',
-              fontSize: '11px',
+              fontSize: '11.5px',
               fontWeight: 600,
               cursor: isRWHAvailable ? 'pointer' : 'not-allowed',
-              whiteSpace: 'nowrap',
               opacity: isRWHAvailable ? 1 : 0.6,
               transition: 'all 0.15s ease'
             }}
+            onMouseEnter={(e) => {
+              if (isRWHAvailable) {
+                e.currentTarget.style.background = 'rgba(0, 240, 255, 0.12)';
+                e.currentTarget.style.borderColor = 'rgba(0, 240, 255, 0.4)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (isRWHAvailable) {
+                e.currentTarget.style.background = 'rgba(0, 240, 255, 0.06)';
+                e.currentTarget.style.borderColor = 'rgba(0, 240, 255, 0.2)';
+              }
+            }}
           >
-            <Droplets size={13} style={{ color: isRWHAvailable ? '#38bdf8' : '#64748b' }} />
-            <span>RWH Potential</span>
-            {!isRWHAvailable && <span style={{ fontSize: '9px', color: '#ef4444', fontWeight: 800 }}>&gt;50mm</span>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Droplets size={14} style={{ color: isRWHAvailable ? '#38bdf8' : '#64748b' }} />
+              <span>RWH Potential</span>
+            </div>
+            <span style={{ fontSize: '9.5px', color: isRWHAvailable ? '#38bdf8' : '#ef4444', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.25)' }}>
+              {isRWHAvailable ? 'Rooftop Model' : '>50mm Paused'}
+            </span>
           </button>
 
-          {/* Button 2: 360° Panoramic Look-Around / Street View */}
+          {/* Action 2: 360° Panoramic Look-Around / Street View */}
           <button
             onClick={onToggleOrbit}
             title={isOrbiting ? "Exit 360° Street View" : "Enter 360° panoramic first-person street view (pitch & yaw look-around)"}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '6px 10px',
-              borderRadius: '7px',
-              border: `1px solid ${isOrbiting ? '#00f0ff' : 'rgba(255, 255, 255, 0.1)'}`,
-              background: isOrbiting ? 'rgba(0, 240, 255, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: '8px',
+              border: `1px solid ${isOrbiting ? '#00f0ff' : 'rgba(255, 255, 255, 0.08)'}`,
+              background: isOrbiting ? 'rgba(0, 240, 255, 0.18)' : 'rgba(255, 255, 255, 0.03)',
               color: isOrbiting ? '#00f0ff' : '#cbd5e1',
-              fontSize: '11px',
+              fontSize: '11.5px',
               fontWeight: 600,
               cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              boxShadow: isOrbiting ? '0 0 10px rgba(0, 240, 255, 0.3)' : 'none',
+              boxShadow: isOrbiting ? '0 0 12px rgba(0, 240, 255, 0.3)' : 'none',
               transition: 'all 0.15s ease'
             }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = isOrbiting ? 'rgba(0, 240, 255, 0.24)' : 'rgba(255, 255, 255, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = isOrbiting ? 'rgba(0, 240, 255, 0.18)' : 'rgba(255, 255, 255, 0.03)';
+            }}
           >
-            <RotateCcw size={13} style={{ transform: isOrbiting ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-            <span>{isOrbiting ? '360° Active' : '360° View'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <RotateCcw size={14} style={{ transform: isOrbiting ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', color: isOrbiting ? '#00f0ff' : '#cbd5e1' }} />
+              <span>360° View</span>
+            </div>
+            <span style={{ fontSize: '9.5px', color: isOrbiting ? '#00f0ff' : '#94a3b8', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.25)' }}>
+              {isOrbiting ? 'Active Orbit' : 'Pitch & Yaw'}
+            </span>
           </button>
 
-          {/* Button 3: 3D Buildings Toggle */}
+          {/* Action 3: 3D Buildings Mesh */}
           <button
             onClick={onToggle3DBuildings}
             title="Toggle extruded 3D buildings"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '6px 10px',
-              borderRadius: '7px',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: '8px',
               border: `1px solid ${show3DBuildings ? 'rgba(138, 180, 248, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
-              background: show3DBuildings ? 'rgba(138, 180, 248, 0.1)' : 'rgba(255, 255, 255, 0.04)',
+              background: show3DBuildings ? 'rgba(138, 180, 248, 0.1)' : 'rgba(255, 255, 255, 0.03)',
               color: show3DBuildings ? '#8ab4f8' : '#94a3b8',
-              fontSize: '11px',
+              fontSize: '11.5px',
               fontWeight: 600,
               cursor: 'pointer',
-              whiteSpace: 'nowrap',
               transition: 'all 0.15s ease'
             }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = show3DBuildings ? 'rgba(138, 180, 248, 0.18)' : 'rgba(255, 255, 255, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = show3DBuildings ? 'rgba(138, 180, 248, 0.1)' : 'rgba(255, 255, 255, 0.03)';
+            }}
           >
-            <Building2 size={13} />
-            <span>3D Buildings</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Building2 size={14} style={{ color: show3DBuildings ? '#8ab4f8' : '#94a3b8' }} />
+              <span>3D Buildings</span>
+            </div>
+            <span style={{ fontSize: '9.5px', color: show3DBuildings ? '#8ab4f8' : '#64748b', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.25)' }}>
+              {show3DBuildings ? 'Extruded' : 'Off'}
+            </span>
           </button>
 
-          {/* Button 4: Demo Preset Button */}
+          {/* Action 4: Demo Simulation Presets */}
           <button
             onClick={onOpenDemo}
             title="Open simplified Monsoon Peak Scenario demo modal"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '6px 10px',
-              borderRadius: '7px',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: '8px',
               border: '1px solid rgba(255, 172, 51, 0.3)',
-              background: 'rgba(255, 172, 51, 0.1)',
+              background: 'rgba(255, 172, 51, 0.08)',
               color: '#ffac33',
-              fontSize: '11px',
+              fontSize: '11.5px',
               fontWeight: 600,
               cursor: 'pointer',
-              whiteSpace: 'nowrap',
               transition: 'all 0.15s ease'
             }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 172, 51, 0.16)';
+              e.currentTarget.style.borderColor = 'rgba(255, 172, 51, 0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 172, 51, 0.08)';
+              e.currentTarget.style.borderColor = 'rgba(255, 172, 51, 0.3)';
+            }}
           >
-            <Zap size={13} />
-            <span>Demo Preset</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Zap size={14} style={{ color: '#ffac33' }} />
+              <span>Demo Presets</span>
+            </div>
+            <span style={{ fontSize: '9.5px', color: '#ffac33', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.25)' }}>
+              Monsoon Scenarios
+            </span>
           </button>
 
-          {/* Button 5: Report / Audit Button */}
+          {/* Action 5: Report / Audit Button */}
           <button
             onClick={onOpenReport}
             title="Citizen & Municipal drainage status override"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '6px 10px',
-              borderRadius: '7px',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: '8px',
               border: '1px solid rgba(239, 68, 68, 0.25)',
-              background: 'rgba(239, 68, 68, 0.08)',
+              background: 'rgba(239, 68, 68, 0.06)',
               color: '#f87171',
-              fontSize: '11px',
+              fontSize: '11.5px',
               fontWeight: 600,
               cursor: 'pointer',
-              whiteSpace: 'nowrap',
               transition: 'all 0.15s ease'
             }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.14)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.06)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+            }}
           >
-            <ShieldAlert size={13} />
-            <span>Report / Audit</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert size={14} style={{ color: '#f87171' }} />
+              <span>Citizen Report</span>
+            </div>
+            <span style={{ fontSize: '9.5px', color: '#f87171', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.25)' }}>
+              Drain Audit
+            </span>
           </button>
         </div>
       ) : (

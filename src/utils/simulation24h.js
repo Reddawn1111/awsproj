@@ -261,6 +261,8 @@ export function generate24HourSimulationSequence({
     totalHours: 24,
     peakRainfallMm,
     cloggingPercent,
+    minElevation,
+    maxElevation,
     steps: hourlySteps
   };
 }

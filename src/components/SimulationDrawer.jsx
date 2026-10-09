@@ -217,17 +217,6 @@ export function SimulationDrawer({
                 <span>Reset (0h)</span>
               </button>
             </div>
-
-            <button
-              type="button"
-              onClick={onStart24Simulation}
-              className="sim24-btn"
-              style={{ background: 'rgba(0, 240, 255, 0.12)', borderColor: 'rgba(0, 240, 255, 0.35)', color: '#00f0ff' }}
-              title="Initialize dynamic 24-hour hydrologic runoff loop"
-            >
-              <Zap size={12} />
-              <span>Simulate Demo</span>
-            </button>
           </div>
 
           {/* Scrubbable 0h to 24h Slider */}
@@ -301,28 +290,7 @@ export function SimulationDrawer({
               <Sliders size={13} style={{ color: '#f59e0b' }} />
               <span>Simulation Parameters</span>
             </div>
-            
-            {onOpenDemoPreset && (
-              <button
-                type="button"
-                onClick={onOpenDemoPreset}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#00f0ff',
-                  fontSize: '10.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '2px',
-                  padding: 0
-                }}
-              >
-                <span>Configure Preset</span>
-                <ChevronRight size={12} />
-              </button>
-            )}
+            <span style={{ fontSize: '10px', color: '#94a3b8' }}>Configured via Quick Actions</span>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
