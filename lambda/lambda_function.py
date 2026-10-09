@@ -288,6 +288,39 @@ def handle_block_simulation(payload):
     flooded_building_count = int(round(flood_fraction * 45)) if base_depth_m > 0 else 0
     vulnerability_index = round(min(1.0, (base_depth_m / 1.8) * 0.6 + (clogging_percent / 100.0) * 0.4), 2) if base_depth_m > 0 else 0.0
 
+    # 5. 24-Hour Time-Stepped Simulation Sequence
+    # Runoff = (Rainfall * Runoff_Coefficient) - (Drain_Capacity * (1 - Clogging_Rate))
+    storm_profile = [
+        0.00, 0.06, 0.15, 0.30, 0.52, 0.75, 0.92, 1.00, 0.95, 0.82,
+        0.68, 0.55, 0.42, 0.30, 0.20, 0.12, 0.06, 0.02, 0.00, 0.00,
+        0.00, 0.00, 0.00, 0.00, 0.00
+    ]
+    effective_drain_cap = BASELINE_RAJAKALUVE_CAPACITY_MM_HR * max(0.05, 1.0 - (clogging_percent / 100.0) * 0.95)
+    sequence_24h = []
+    accum_water_mm = 0.0
+
+    for hr, fraction in enumerate(storm_profile):
+        hr_rain = round(rainfall_mm * fraction, 1)
+        hr_q_in = hr_rain * IMPERVIOUS_FRACTION
+        hr_q_out = effective_drain_cap
+        net_balance = round(hr_q_in - hr_q_out, 1)
+
+        if net_balance > 0:
+            accum_water_mm += net_balance
+        else:
+            accum_water_mm = max(0.0, accum_water_mm - abs(net_balance) * 1.2)
+
+        hr_depth = round(min(MAX_WATER_CEILING_METERS, max(0.0, accum_water_mm * 0.015)), 2)
+        sequence_24h.append({
+            "hour": hr,
+            "rainfall_mm": hr_rain,
+            "q_in_mm_hr": round(hr_q_in, 1),
+            "q_out_mm_hr": round(hr_q_out, 1),
+            "net_runoff_balance": net_balance,
+            "accumulated_water_mm": round(accum_water_mm, 1),
+            "peak_water_depth_m": hr_depth
+        })
+
     return {
         "project": "4clique",
         "mode": "block_simulation",
@@ -315,7 +348,8 @@ def handle_block_simulation(payload):
             "tier": baseline_flow["tier"]
         },
         "flood_reduction_percentage": base_reduction_pct,
-        "pooled_cells": pooled_cells
+        "pooled_cells": pooled_cells,
+        "sequence_24h": sequence_24h
     }
 
 

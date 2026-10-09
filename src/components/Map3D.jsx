@@ -1,9 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { TARGET_CAMERA, TERRAIN_CONFIG } from '../config/camera';
-import { CRITICAL_INFRASTRUCTURE } from '../config/infrastructure';
+import { TARGET_CAMERA, TERRAIN_CONFIG, BENGALURU_CENTER, KARNATAKA_CAMERA } from '../config/camera';
 import { boundsToGeoJSON, buildOutsideMaskGeoJSON, calculateGravityWaterFlow } from '../utils/geo';
-import { Layers, Compass, Eye, Waves, AlertTriangle } from 'lucide-react';
+import { KARNATAKA_DRAINS, getKarnatakaDrainsGeoJSON, KARNATAKA_BOUNDS } from '../config/karnatakaDrains';
+import { calculateBlockRWH } from '../utils/rwh';
+import {
+  Layers,
+  Compass,
+  Eye,
+  AlertTriangle,
+  Play,
+  Pause,
+  RotateCcw,
+  X,
+  ShieldAlert,
+  Gauge,
+  MapPin,
+  Maximize2
+} from 'lucide-react';
 
 /**
  * Urban Waterlogging Severity Classification & Color Thresholds:
@@ -16,6 +30,14 @@ function getWaterloggingColor(depthMeters) {
   if (depthMeters >= 0.6) return '#ef4444'; // Red
   if (depthMeters >= 0.3) return '#f97316'; // Orange
   if (depthMeters > 0)    return '#eab308'; // Yellow
+  return '#1f242d';                         // Normal Dark Charcoal Grey
+}
+
+function getCompassHeadingLabel(deg) {
+  const normalized = ((deg % 360) + 360) % 360;
+  const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  const index = Math.round(normalized / 22.5) % 16;
+  return `${Math.round(normalized)}° ${directions[index]}`;
 }
 
 export function Map3D({
@@ -23,6 +45,7 @@ export function Map3D({
   mode = 'live', // 'live' | 'armed' | 'block'
   isSimulateMode = false,
   blockBounds = null,
+  blockLabel = '',
   rainfallMm = 120,
   cloggingPercent = 70,
   userLocation = null,
@@ -30,19 +53,59 @@ export function Map3D({
   liveHotspots = [],
   simulationResult = null,
   onElevationStatsCalculated = null,
+  onBlockRwhCalculated = null,
   onMapMoveStart,
   onMapIdle,
-  mapRefOut
+  mapRefOut,
+  drainageAlerts = [],
+  onOpenReportModal = null,
+  isOrbiting = false, // Aliased to 360 Street View mode
+  onToggleOrbit = null,
+  show3DBuildings = true,
+  onToggle3DBuildings = null,
+  // 24-Hour Simulation Sequence Props
+  sim24Sequence = null,
+  currentSimHour = 0,
+  is24SimActive = false
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
-  const markersRef = useRef({});
   const locateMarkerRef = useRef(null);
   const flowAnimFrameRef = useRef(null);
+
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(null);
   const [showTerrain, setShowTerrain] = useState(true);
-  const [showBuildings, setShowBuildings] = useState(true);
+
+  // 360° Street View / Panoramic Look-Around Controller State
+  const [is360AutoPanning, setIs360AutoPanning] = useState(false);
+  const [hudYaw, setHudYaw] = useState(0);
+  const [hudPitch, setHudPitch] = useState(55);
+
+  const is360ActiveRef = useRef(false);
+  const is360AutoPanningRef = useRef(false);
+  const origin360CoordsRef = useRef(null);
+  const priorCameraRef = useRef(null);
+  const currentYawRef = useRef(0);
+  const currentPitchRef = useRef(55);
+  const targetYawRef = useRef(0);
+  const targetPitchRef = useRef(55);
+  const velYawRef = useRef(0);
+  const velPitchRef = useRef(0);
+  const isDragging360Ref = useRef(false);
+  const lastPointerPosRef = useRef({ x: 0, y: 0 });
+  const panoramaAnimFrameRef = useRef(null);
+
+  // Active Drainage Chokepoint Telemetry Popup Card State
+  const [activeDrainAlert, setActiveDrainAlert] = useState(null);
+
+  useEffect(() => {
+    is360ActiveRef.current = isOrbiting;
+  }, [isOrbiting]);
+
+  useEffect(() => {
+    is360AutoPanningRef.current = is360AutoPanning;
+  }, [is360AutoPanning]);
 
   // Initialize Mapbox GL JS v3
   useEffect(() => {
@@ -63,9 +126,9 @@ export function Map3D({
         center: TARGET_CAMERA.center,
         zoom: TARGET_CAMERA.zoom,
         pitch: 55,
-        bearing: -20,
+        bearing: -15,
         maxPitch: 85,
-        minZoom: 10,
+        minZoom: 5.5, // Expanded minimum zoom for full Karnataka state-wide view
         maxZoom: 18,
         antialias: true,
         attributionControl: false
@@ -89,9 +152,12 @@ export function Map3D({
         updateGravitySimulationAndBuildings();
       });
 
-      // Interactive Map Click for Block Extractor when armed or in block mode
+      // Interactive Map Click for Block Extractor
       map.on('click', (e) => {
-        if (onMapClickForBlock) {
+        // Dismiss active drainage telemetry card if open
+        setActiveDrainAlert(null);
+
+        if (onMapClickForBlock && !is360ActiveRef.current) {
           onMapClickForBlock([e.lngLat.lng, e.lngLat.lat]);
         }
       });
@@ -172,7 +238,7 @@ export function Map3D({
             labelLayerId
           );
 
-          // 3b. Dedicated GeoJSON Highlight Overlay for Inundated Buildings
+          // 3b. Dedicated GeoJSON Highlight Overlay for Inundated Buildings (Single Atomic Repaint)
           if (!map.getSource('flooded-buildings-source')) {
             map.addSource('flooded-buildings-source', {
               type: 'geojson',
@@ -255,7 +321,7 @@ export function Map3D({
           data: { type: 'FeatureCollection', features: [] }
         });
 
-        // 6a. Dynamic Water Fill (Shallow <0.4m -> rgba(0, 180, 216, 0.6), Deep >0.8m -> rgba(0, 119, 182, 0.8))
+        // 6a. Dynamic Water Fill
         map.addLayer({
           id: 'water-fill',
           type: 'fill',
@@ -288,14 +354,209 @@ export function Map3D({
           }
         }, '3d-buildings');
 
-        // 7. Water Surface Shimmer & Flow Lines Animation (requestAnimationFrame)
-        // Modulates fill-opacity between 0.55 and 0.82; animates flow dash offset
+        // =========================================================================
+        // 7. KARNATAKA STATE-WIDE DRAINAGE PINPOINTS & MULTI-RESOLUTION CLUSTERING
+        // Refactored from heavy DOM elements to high-performance GeoJSON cluster indexing
+        // =========================================================================
+        const initialDrainsGeoJSON = getKarnatakaDrainsGeoJSON(
+          (drainageAlerts && drainageAlerts.length > 0) ? drainageAlerts : KARNATAKA_DRAINS
+        );
+
+        map.addSource('karnataka-drains-source', {
+          type: 'geojson',
+          data: initialDrainsGeoJSON,
+          cluster: true,
+          clusterMaxZoom: 11, // At zoom 12+, clusters smoothly resolve into distinct pinpoint markers
+          clusterRadius: 50,  // Progressive density grouping radius in pixels
+          clusterProperties: {
+            severe_count: ['+', ['case', ['==', ['get', 'status'], 'Severe'], 1, 0]],
+            moderate_count: ['+', ['case', ['==', ['get', 'status'], 'Moderate'], 1, 0]]
+          }
+        });
+
+        // 7a. State Zoom Cluster Halo (Heat / Density halo around regional nodes)
+        map.addLayer({
+          id: 'karnataka-drain-cluster-halo',
+          type: 'circle',
+          source: 'karnataka-drains-source',
+          filter: ['has', 'point_count'],
+          paint: {
+            'circle-color': [
+              'case',
+              ['>', ['get', 'severe_count'], 0], 'rgba(239, 68, 68, 0.28)',
+              ['>', ['get', 'moderate_count'], 0], 'rgba(245, 158, 11, 0.25)',
+              'rgba(0, 240, 255, 0.22)'
+            ],
+            'circle-radius': [
+              'step',
+              ['get', 'point_count'],
+              24, 6, 32, 15, 42
+            ],
+            'circle-blur': 0.35
+          }
+        });
+
+        // 7b. Density Cluster Pins (Color-coded by highest risk in cluster)
+        map.addLayer({
+          id: 'karnataka-drain-clusters',
+          type: 'circle',
+          source: 'karnataka-drains-source',
+          filter: ['has', 'point_count'],
+          paint: {
+            'circle-color': [
+              'case',
+              ['>', ['get', 'severe_count'], 0], '#ef4444',
+              ['>', ['get', 'moderate_count'], 0], '#f59e0b',
+              '#0284c7'
+            ],
+            'circle-radius': [
+              'step',
+              ['get', 'point_count'],
+              16, 6, 22, 15, 28
+            ],
+            'circle-stroke-width': 2.5,
+            'circle-stroke-color': '#ffffff'
+          }
+        });
+
+        // 7c. Cluster Point Count Label
+        map.addLayer({
+          id: 'karnataka-drain-cluster-count',
+          type: 'symbol',
+          source: 'karnataka-drains-source',
+          filter: ['has', 'point_count'],
+          layout: {
+            'text-field': '{point_count_abbreviated}',
+            'text-size': 12
+          },
+          paint: {
+            'text-color': '#ffffff'
+          }
+        });
+
+        // 7d. Distinct Local Pinpoint Outer Glow (District / Taluk / Ward scale)
+        map.addLayer({
+          id: 'karnataka-drain-unclustered-glow',
+          type: 'circle',
+          source: 'karnataka-drains-source',
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-color': [
+              'match',
+              ['get', 'status'],
+              'Severe', 'rgba(239, 68, 68, 0.35)',
+              'Moderate', 'rgba(245, 158, 11, 0.35)',
+              'rgba(16, 185, 129, 0.35)'
+            ],
+            'circle-radius': 13,
+            'circle-blur': 0.4
+          }
+        });
+
+        // 7e. Distinct Local Drainage Inlet & Major Outfall Pinpoint Circle
+        map.addLayer({
+          id: 'karnataka-drain-unclustered-pin',
+          type: 'circle',
+          source: 'karnataka-drains-source',
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-color': [
+              'match',
+              ['get', 'status'],
+              'Severe', '#ef4444',
+              'Moderate', '#f59e0b',
+              '#10b981'
+            ],
+            'circle-radius': 6.5,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff'
+          }
+        });
+
+        // 7f. Local Drain Name Label (Visible at Ward / Local zoom >= 12.5)
+        map.addLayer({
+          id: 'karnataka-drain-unclustered-label',
+          type: 'symbol',
+          source: 'karnataka-drains-source',
+          filter: ['!', ['has', 'point_count']],
+          minzoom: 12.5,
+          layout: {
+            'text-field': ['get', 'shortName'],
+            'text-size': 10,
+            'text-offset': [0, 1.4],
+            'text-anchor': 'top'
+          },
+          paint: {
+            'text-color': '#f8fafc',
+            'text-halo-color': '#0a0d14',
+            'text-halo-width': 2
+          }
+        });
+
+        // Cluster Click: Progressive multi-resolution zoom
+        map.on('click', 'karnataka-drain-clusters', (e) => {
+          const features = map.queryRenderedFeatures(e.point, { layers: ['karnataka-drain-clusters'] });
+          if (!features.length) return;
+          const clusterId = features[0].properties.cluster_id;
+          const src = map.getSource('karnataka-drains-source');
+          if (src && typeof src.getClusterExpansionZoom === 'function') {
+            src.getClusterExpansionZoom(clusterId, (err, zoom) => {
+              if (err) return;
+              map.easeTo({
+                center: features[0].geometry.coordinates,
+                zoom: Math.min(16, zoom),
+                duration: 700
+              });
+            });
+          }
+        });
+
+        // Unclustered Pin Click: Open telemetry card and focus camera
+        map.on('click', 'karnataka-drain-unclustered-pin', (e) => {
+          e.originalEvent.stopPropagation();
+          const feat = e.features?.[0];
+          if (!feat) return;
+          const props = feat.properties;
+          const coords = feat.geometry.coordinates;
+
+          map.flyTo({
+            center: coords,
+            zoom: 15.8,
+            pitch: 55,
+            duration: 1000
+          });
+
+          setActiveDrainAlert({
+            id: props.id,
+            name: props.name,
+            shortName: props.shortName,
+            district: props.district,
+            taluk: props.taluk,
+            valley: props.valley,
+            currentStatus: props.status,
+            defaultStatus: props.status,
+            designCapacityM3s: props.designCapacityM3s,
+            currentDischargeM3s: props.currentDischargeM3s,
+            deficitPercent: props.deficitPercent,
+            criticality: props.criticality,
+            description: props.description,
+            lastDesilted: props.lastDesilted,
+            coordinates: coords
+          });
+        });
+
+        // Cursor Pointer on hover
+        map.on('mouseenter', 'karnataka-drain-clusters', () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', 'karnataka-drain-clusters', () => { map.getCanvas().style.cursor = ''; });
+        map.on('mouseenter', 'karnataka-drain-unclustered-pin', () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', 'karnataka-drain-unclustered-pin', () => { map.getCanvas().style.cursor = ''; });
+
+        // 8. Water Surface Shimmer & Flow Lines Animation Loop
         let animStep = 0;
         const animateFlow = () => {
           animStep += 1;
           if (mapRef.current) {
             const m = mapRef.current;
-            // Shimmer between 0.55 and 0.82: midpoint 0.685, amplitude 0.135
             const shimmerOpacity = 0.685 + Math.sin(animStep * 0.05) * 0.135;
             try {
               if (m.getLayer('water-fill')) {
@@ -322,12 +583,11 @@ export function Map3D({
 
       return () => {
         if (flowAnimFrameRef.current) cancelAnimationFrame(flowAnimFrameRef.current);
+        if (panoramaAnimFrameRef.current) cancelAnimationFrame(panoramaAnimFrameRef.current);
         if (locateMarkerRef.current) {
           locateMarkerRef.current.remove();
           locateMarkerRef.current = null;
         }
-        Object.values(markersRef.current).forEach(m => m.remove());
-        markersRef.current = {};
         map.remove();
         mapRef.current = null;
       };
@@ -336,8 +596,223 @@ export function Map3D({
     }
   }, [mapboxToken]);
 
-  // 1. Elevation Sampling & Gravity Flow Model with Dedicated GeoJSON Highlight Overlay
-  const updateGravitySimulationAndBuildings = () => {
+  // Sync state-wide drains GeoJSON with local storage overrides
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+    const src = map.getSource('karnataka-drains-source');
+    if (src) {
+      src.setData(getKarnatakaDrainsGeoJSON(drainageAlerts && drainageAlerts.length > 0 ? drainageAlerts : KARNATAKA_DRAINS));
+    }
+  }, [drainageAlerts, mapLoaded]);
+
+  // Sync drain layers visibility: Dim/hide during active 1km block extraction
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+    const isSimBlock = (mode === 'block' || isSimulateMode) && blockBounds;
+    const vis = isSimBlock ? 'none' : 'visible';
+
+    const drainLayers = [
+      'karnataka-drain-cluster-halo',
+      'karnataka-drain-clusters',
+      'karnataka-drain-cluster-count',
+      'karnataka-drain-unclustered-glow',
+      'karnataka-drain-unclustered-pin',
+      'karnataka-drain-unclustered-label'
+    ];
+
+    drainLayers.forEach((lyr) => {
+      if (map.getLayer(lyr)) {
+        map.setLayoutProperty(lyr, 'visibility', vis);
+      }
+    });
+  }, [mode, isSimulateMode, blockBounds, mapLoaded]);
+
+  // =========================================================================
+  // 360-DEGREE PANORAMA / STREET VIEW INTERACTION CONTROLLER
+  // Replaces OrbitControls with First-Person Pitch & Yaw Controller
+  // Fixed origin position, PointerLock / mouse-drag / touch-drag with damping
+  // =========================================================================
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    if (!isOrbiting) {
+      // Exit 360 Street View mode: Restore standard map controls
+      if (panoramaAnimFrameRef.current) {
+        cancelAnimationFrame(panoramaAnimFrameRef.current);
+        panoramaAnimFrameRef.current = null;
+      }
+      map.dragPan.enable();
+      map.dragRotate.enable();
+      map.touchZoomRotate.enableRotation();
+      return;
+    }
+
+    // Entering 360 Panoramic Look-Around Mode
+    const origin = blockBounds?.center || (userLocation ? userLocation : [map.getCenter().lng, map.getCenter().lat]);
+    origin360CoordsRef.current = origin;
+    priorCameraRef.current = {
+      center: map.getCenter(),
+      zoom: map.getZoom(),
+      pitch: map.getPitch(),
+      bearing: map.getBearing()
+    };
+
+    currentYawRef.current = map.getBearing() || 0;
+    targetYawRef.current = currentYawRef.current;
+    currentPitchRef.current = Math.max(15, Math.min(80, map.getPitch() || 55));
+    targetPitchRef.current = currentPitchRef.current;
+    velYawRef.current = 0;
+    velPitchRef.current = 0;
+    isDragging360Ref.current = false;
+
+    // Fix camera position at origin point with street-level eye height
+    map.dragPan.disable();
+    map.dragRotate.disable();
+    map.touchZoomRotate.disableRotation();
+
+    map.flyTo({
+      center: origin,
+      zoom: 17.5,
+      pitch: currentPitchRef.current,
+      bearing: currentYawRef.current,
+      duration: 1200
+    });
+
+    // Pointer Drag Handlers (Mouse)
+    const handleMouseDown = (e) => {
+      isDragging360Ref.current = true;
+      lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const handleMouseMove = (e) => {
+      if (!isDragging360Ref.current) return;
+      const dx = e.clientX - lastPointerPosRef.current.x;
+      const dy = e.clientY - lastPointerPosRef.current.y;
+      lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+
+      const sensitivity = 0.22; // Degrees per pixel
+      targetYawRef.current = (targetYawRef.current + dx * sensitivity) % 360;
+      if (targetYawRef.current < 0) targetYawRef.current += 360;
+
+      // Vertical drag Y-axis controls Pitch (clamped between 5° and 85° to prevent flipping)
+      targetPitchRef.current = Math.max(5, Math.min(85, targetPitchRef.current - dy * sensitivity));
+
+      velYawRef.current = dx * sensitivity;
+      velPitchRef.current = -dy * sensitivity;
+    };
+
+    const handleMouseUp = () => {
+      isDragging360Ref.current = false;
+    };
+
+    // Touch Drag Handlers (Mobile / Tablet)
+    const handleTouchStart = (e) => {
+      if (e.touches.length === 1) {
+        isDragging360Ref.current = true;
+        lastPointerPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (!isDragging360Ref.current || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - lastPointerPosRef.current.x;
+      const dy = e.touches[0].clientY - lastPointerPosRef.current.y;
+      lastPointerPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+
+      const sensitivity = 0.28;
+      targetYawRef.current = (targetYawRef.current + dx * sensitivity) % 360;
+      if (targetYawRef.current < 0) targetYawRef.current += 360;
+      targetPitchRef.current = Math.max(5, Math.min(85, targetPitchRef.current - dy * sensitivity));
+
+      velYawRef.current = dx * sensitivity;
+      velPitchRef.current = -dy * sensitivity;
+    };
+
+    const handleTouchEnd = () => {
+      isDragging360Ref.current = false;
+    };
+
+    container.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd);
+
+    // Continuous 60 FPS Damping & Inertia Animation Loop
+    let running = true;
+    const animateLookAround = () => {
+      if (!running || !mapRef.current) return;
+
+      if (!isDragging360Ref.current) {
+        if (is360AutoPanningRef.current) {
+          targetYawRef.current = (targetYawRef.current + 0.2) % 360;
+        } else {
+          // Inertia decay
+          velYawRef.current *= 0.88;
+          velPitchRef.current *= 0.88;
+          targetYawRef.current = (targetYawRef.current + velYawRef.current) % 360;
+          if (targetYawRef.current < 0) targetYawRef.current += 360;
+          targetPitchRef.current = Math.max(5, Math.min(85, targetPitchRef.current + velPitchRef.current));
+        }
+      }
+
+      // Smooth damping interpolation
+      const damping = 0.18;
+      currentYawRef.current += (targetYawRef.current - currentYawRef.current) * damping;
+      currentPitchRef.current += (targetPitchRef.current - currentPitchRef.current) * damping;
+
+      map.setBearing(currentYawRef.current);
+      map.setPitch(currentPitchRef.current);
+      // Strictly fix camera position at selected origin point
+      map.setCenter(origin360CoordsRef.current);
+
+      setHudYaw(Math.round(currentYawRef.current));
+      setHudPitch(Math.round(currentPitchRef.current));
+
+      panoramaAnimFrameRef.current = requestAnimationFrame(animateLookAround);
+    };
+
+    panoramaAnimFrameRef.current = requestAnimationFrame(animateLookAround);
+
+    return () => {
+      running = false;
+      if (panoramaAnimFrameRef.current) {
+        cancelAnimationFrame(panoramaAnimFrameRef.current);
+        panoramaAnimFrameRef.current = null;
+      }
+      container.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      container.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isOrbiting, mapLoaded, blockBounds, userLocation]);
+
+  // Sync 3D Buildings Visibility with Ribbon Toggle
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+    const vis = show3DBuildings ? 'visible' : 'none';
+    if (map.getLayer('3d-buildings')) {
+      map.setLayoutProperty('3d-buildings', 'visibility', vis);
+    }
+    if (map.getLayer('flooded-buildings-layer')) {
+      map.setLayoutProperty('flooded-buildings-layer', 'visibility', vis);
+    }
+  }, [show3DBuildings, mapLoaded]);
+
+  // =========================================================================
+  // 1. ELEVATION SAMPLING, GRAVITY FLOW & DYNAMIC RWH CALCULATION
+  // Supports both static single-run and 24-Hour Time-Stepped Sequence Playback
+  // =========================================================================
+  const updateGravitySimulationAndBuildings = useCallback(() => {
     if (!mapRef.current || !mapLoaded) return;
     const map = mapRef.current;
 
@@ -351,7 +826,71 @@ export function Map3D({
       return;
     }
 
-    // A. Ground Elevation Sampling across the 1km x 1km block & Hydrologic Runoff
+    // 24-Hour Simulation Time-Stepped Mode Override
+    if (is24SimActive && sim24Sequence?.steps?.[currentSimHour]) {
+      const activeStep = sim24Sequence.steps[currentSimHour];
+      if (waterSrc && activeStep.waterGeoJSON) {
+        waterSrc.setData(activeStep.waterGeoJSON);
+      }
+
+      // Transition building colors dynamically per 24h step
+      if (fldSrc) {
+        try {
+          const buildingLayers = ['3d-buildings', 'building-extrusion'].filter(l => map.getLayer(l));
+          const renderedBuildings = buildingLayers.length > 0 ? map.queryRenderedFeatures({ layers: buildingLayers }) : [];
+          const { minLng, minLat, maxLng, maxLat } = blockBounds;
+          const seenCenters = new Set();
+          const floodedFeatures = [];
+
+          renderedBuildings.forEach((building) => {
+            let center = null;
+            if (building.geometry?.type === 'Polygon' && building.geometry.coordinates?.[0]?.length) {
+              const ring = building.geometry.coordinates[0];
+              let sLng = 0, sLat = 0;
+              for (let i = 0; i < ring.length; i++) { sLng += ring[i][0]; sLat += ring[i][1]; }
+              center = [sLng / ring.length, sLat / ring.length];
+            } else if (building.geometry?.type === 'MultiPolygon' && building.geometry.coordinates?.[0]?.[0]?.length) {
+              const ring = building.geometry.coordinates[0][0];
+              let sLng = 0, sLat = 0;
+              for (let i = 0; i < ring.length; i++) { sLng += ring[i][0]; sLat += ring[i][1]; }
+              center = [sLng / ring.length, sLat / ring.length];
+            }
+            if (!center) return;
+            const [bLng, bLat] = center;
+            if (bLng < minLng || bLng > maxLng || bLat < minLat || bLat > maxLat) return;
+
+            const cKey = `${bLng.toFixed(5)},${bLat.toFixed(5)}`;
+            if (seenCenters.has(cKey)) return;
+            seenCenters.add(cKey);
+
+            const depthAtBldg = activeStep.peakWaterDepthM > 0.05
+              ? Number((activeStep.peakWaterDepthM * 0.85).toFixed(2))
+              : 0;
+            const renderColor = getWaterloggingColor(depthAtBldg);
+
+            floodedFeatures.push({
+              type: 'Feature',
+              id: `sim24_bldg_${floodedFeatures.length}`,
+              properties: {
+                id: `sim24_bldg_${floodedFeatures.length}`,
+                renderColor,
+                height: building.properties?.height || 18,
+                min_height: building.properties?.min_height || 0,
+                depth_m: depthAtBldg
+              },
+              geometry: building.geometry
+            });
+          });
+
+          fldSrc.setData({ type: 'FeatureCollection', features: floodedFeatures });
+        } catch (e) {
+          // ignore
+        }
+      }
+      return;
+    }
+
+    // Standard Steady-State Hydrologic Calculation
     const { minElevation, maxElevation, floodRise, waterSurfaceElevation, waterGeoJSON } = calculateGravityWaterFlow(
       map,
       blockBounds,
@@ -359,27 +898,17 @@ export function Map3D({
       cloggingPercent
     );
 
-    console.log('[4clique Simulation] Sampled Elevation:', {
-      minElevation: Number(minElevation.toFixed(1)),
-      floodLevel: Number(floodRise.toFixed(2))
-    });
-
     if (onElevationStatsCalculated) {
       onElevationStatsCalculated({ minElevation, maxElevation, floodRise, waterSurfaceElevation });
     }
 
-    // B. Drape fluid water geometry strictly over low depressions where terrain elevation < waterSurfaceElevation
     if (waterSrc) {
       waterSrc.setData(waterGeoJSON);
-      if (map.getLayer('water-fill')) {
-        map.setLayoutProperty('water-fill', 'visibility', 'visible');
-      }
-      if (map.getLayer('water-flow-lines')) {
-        map.setLayoutProperty('water-flow-lines', 'visibility', 'visible');
-      }
+      if (map.getLayer('water-fill')) map.setLayoutProperty('water-fill', 'visibility', 'visible');
+      if (map.getLayer('water-flow-lines')) map.setLayoutProperty('water-flow-lines', 'visibility', 'visible');
     }
 
-    // C. Individual Per-Building Basement Risk & Elevation Tinting via Dedicated GeoJSON Highlight Overlay
+    // Dynamic Building Footprint Extraction & Area-Specific RWH Computation
     if (!fldSrc) return;
 
     try {
@@ -393,21 +922,13 @@ export function Map3D({
         let center = null;
         if (building.geometry?.type === 'Polygon' && building.geometry.coordinates?.[0]?.length) {
           const ring = building.geometry.coordinates[0];
-          let sumLng = 0;
-          let sumLat = 0;
-          for (let i = 0; i < ring.length; i++) {
-            sumLng += ring[i][0];
-            sumLat += ring[i][1];
-          }
+          let sumLng = 0, sumLat = 0;
+          for (let i = 0; i < ring.length; i++) { sumLng += ring[i][0]; sumLat += ring[i][1]; }
           center = [sumLng / ring.length, sumLat / ring.length];
         } else if (building.geometry?.type === 'MultiPolygon' && building.geometry.coordinates?.[0]?.[0]?.length) {
           const ring = building.geometry.coordinates[0][0];
-          let sumLng = 0;
-          let sumLat = 0;
-          for (let i = 0; i < ring.length; i++) {
-            sumLng += ring[i][0];
-            sumLat += ring[i][1];
-          }
+          let sumLng = 0, sumLat = 0;
+          for (let i = 0; i < ring.length; i++) { sumLng += ring[i][0]; sumLat += ring[i][1]; }
           center = [sumLng / ring.length, sumLat / ring.length];
         }
 
@@ -430,7 +951,7 @@ export function Map3D({
         const elevRange = Math.max(3.0, maxElevation - minElevation);
         const relElev = Math.max(0, Math.min(1, (bldgElev - minElevation) / elevRange));
         const clogRatio = Math.max(0, Math.min(100, cloggingPercent || 0)) / 100;
-        // Reach threshold extends up the catchment slope as rain and clogging escalate
+
         const floodReachThreshold = floodRise > 0.02
           ? Math.min(0.88, 0.25 + (floodRise / 2.2) * 0.35 + clogRatio * 0.28)
           : 0;
@@ -458,72 +979,38 @@ export function Map3D({
         });
       });
 
-      // If fewer than 12 buildings found (e.g. view zoomed out or sparse area), generate synthetic building footprints
-      if (floodedFeatures.length < 12) {
-        const gridRows = 5;
-        const gridCols = 5;
-        const dLng = (maxLng - minLng) / (gridCols + 1);
-        const dLat = (maxLat - minLat) / (gridRows + 1);
-        const bldgHalfLng = dLng * 0.28;
-        const bldgHalfLat = dLat * 0.28;
-
-        for (let r = 1; r <= gridRows; r++) {
-          for (let c = 1; c <= gridCols; c++) {
-            const bLng = minLng + c * dLng;
-            const bLat = minLat + r * dLat;
-            let bldgElev = 880.0;
-            if (typeof map.queryTerrainElevation === 'function') {
-              const qElev = map.queryTerrainElevation([bLng, bLat]);
-              if (qElev !== null && !isNaN(qElev)) bldgElev = qElev;
-            }
-            const elevRange = Math.max(3.0, maxElevation - minElevation);
-            const relElev = Math.max(0, Math.min(1, (bldgElev - minElevation) / elevRange));
-            const clogRatio = Math.max(0, Math.min(100, cloggingPercent || 0)) / 100;
-            const floodReachThreshold = floodRise > 0.02
-              ? Math.min(0.88, 0.25 + (floodRise / 2.2) * 0.35 + clogRatio * 0.28)
-              : 0;
-
-            let waterDepthAtBuilding = 0;
-            if (floodRise > 0.02 && relElev <= floodReachThreshold) {
-              const depressionFactor = Math.max(0, 1.0 - (relElev / floodReachThreshold));
-              waterDepthAtBuilding = Number((floodRise * (0.22 + 0.78 * Math.pow(depressionFactor, 1.2))).toFixed(2));
-            }
-
-            const renderColor = getWaterloggingColor(waterDepthAtBuilding);
-
-            floodedFeatures.push({
-              type: 'Feature',
-              id: `synth_bldg_${r}_${c}`,
-              properties: {
-                id: `synth_bldg_${r}_${c}`,
-                renderColor,
-                height: 16 + ((r * 11 + c * 17) % 25),
-                min_height: 0,
-                depth_m: Number(waterDepthAtBuilding.toFixed(2))
-              },
-              geometry: {
-                type: 'Polygon',
-                coordinates: [[
-                  [Number((bLng - bldgHalfLng).toFixed(6)), Number((bLat - bldgHalfLat).toFixed(6))],
-                  [Number((bLng + bldgHalfLng).toFixed(6)), Number((bLat - bldgHalfLat).toFixed(6))],
-                  [Number((bLng + bldgHalfLng).toFixed(6)), Number((bLat + bldgHalfLat).toFixed(6))],
-                  [Number((bLng - bldgHalfLng).toFixed(6)), Number((bLat + bldgHalfLat).toFixed(6))],
-                  [Number((bLng - bldgHalfLng).toFixed(6)), Number((bLat - bldgHalfLat).toFixed(6))]
-                ]]
-              }
-            });
-          }
-        }
-      }
-
       fldSrc.setData({
         type: 'FeatureCollection',
         features: floodedFeatures
       });
+
+      // Calculate Area-Specific Rainwater Harvesting metrics from rendered structures
+      if (onBlockRwhCalculated) {
+        const rwhData = calculateBlockRWH({
+          blockBounds,
+          blockLabel,
+          rainfallMm,
+          renderedBuildings
+        });
+        onBlockRwhCalculated(rwhData);
+      }
     } catch (err) {
       console.warn("Dedicated highlight overlay error:", err);
     }
-  };
+  }, [
+    mapLoaded,
+    mode,
+    isSimulateMode,
+    blockBounds,
+    is24SimActive,
+    sim24Sequence,
+    currentSimHour,
+    rainfallMm,
+    cloggingPercent,
+    blockLabel,
+    onElevationStatsCalculated,
+    onBlockRwhCalculated
+  ]);
 
   // Sync Block Extractor Bounding Box & Outside-Mask
   useEffect(() => {
@@ -543,12 +1030,12 @@ export function Map3D({
     }
 
     updateGravitySimulationAndBuildings();
-  }, [mode, isSimulateMode, blockBounds, mapLoaded]);
+  }, [mode, isSimulateMode, blockBounds, mapLoaded, updateGravitySimulationAndBuildings]);
 
-  // Sync Gravity Water Flow & Building Tinting on parameter changes
+  // Sync Gravity Water Flow & Building Tinting on parameter or step changes
   useEffect(() => {
     updateGravitySimulationAndBuildings();
-  }, [rainfallMm, cloggingPercent, blockBounds, isSimulateMode, mode, mapLoaded]);
+  }, [rainfallMm, cloggingPercent, blockBounds, isSimulateMode, mode, mapLoaded, is24SimActive, currentSimHour, updateGravitySimulationAndBuildings]);
 
   // Locate Me Pinpoint Marker
   useEffect(() => {
@@ -577,70 +1064,25 @@ export function Map3D({
     }
   }, [userLocation, mapLoaded]);
 
-  // Infrastructure Markers
-  useEffect(() => {
-    if (!mapRef.current || !mapLoaded) return;
-    const map = mapRef.current;
-
-    CRITICAL_INFRASTRUCTURE.forEach((node) => {
-      let isFlooded = false;
-      if (mode === 'block' && simulationResult?.infrastructure) {
-        const found = simulationResult.infrastructure.find(n => n.id === node.id);
-        if (found) isFlooded = found.status === 'FLOODED';
-      }
-
-      if (markersRef.current[node.id]) {
-        const el = markersRef.current[node.id].getElement();
-        const pin = el.querySelector('.marker-pin');
-        const dot = el.querySelector('.pulse-dot');
-        const statusBadge = el.querySelector('.marker-status-text');
-
-        if (pin) pin.className = `marker-pin ${isFlooded ? 'flooded' : 'operational'}`;
-        if (dot) dot.className = `pulse-dot ${isFlooded ? 'flooded' : 'operational'}`;
-        if (statusBadge) {
-          statusBadge.textContent = isFlooded ? 'FLOODED' : 'OPERATIONAL';
-          statusBadge.style.color = isFlooded ? '#ea4335' : '#34a853';
-        }
-      } else {
-        const el = document.createElement('div');
-        el.className = 'mapbox-custom-marker';
-        el.innerHTML = `
-          <div class="marker-pin ${isFlooded ? 'flooded' : 'operational'}">
-            <div class="pulse-dot ${isFlooded ? 'flooded' : 'operational'}"></div>
-            <span style="font-weight: 600;">${node.name}</span>
-            <span class="marker-status-text" style="margin-left: 5px; font-weight: 800; color: ${isFlooded ? '#ea4335' : '#34a853'}">
-              ${isFlooded ? 'FLOODED' : 'OPERATIONAL'}
-            </span>
-          </div>
-        `;
-
-        el.addEventListener('click', () => {
-          map.flyTo({
-            center: node.coordinates,
-            zoom: 16,
-            pitch: 60,
-            bearing: -20,
-            duration: 1400
-          });
-        });
-
-        const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-          .setLngLat(node.coordinates)
-          .addTo(map);
-
-        markersRef.current[node.id] = marker;
-      }
-    });
-  }, [simulationResult, mode, mapLoaded]);
-
   const handleResetCamera = () => {
     if (!mapRef.current) return;
     mapRef.current.flyTo({
-      center: TARGET_CAMERA.center,
+      center: BENGALURU_CENTER,
       zoom: TARGET_CAMERA.zoom,
       pitch: 55,
-      bearing: -20,
+      bearing: -15,
       duration: 1500
+    });
+  };
+
+  const handleFlyToFullKarnataka = () => {
+    if (!mapRef.current) return;
+    mapRef.current.flyTo({
+      center: KARNATAKA_BOUNDS.center,
+      zoom: KARNATAKA_BOUNDS.zoom,
+      pitch: KARNATAKA_BOUNDS.pitch,
+      bearing: KARNATAKA_BOUNDS.bearing,
+      duration: 1600
     });
   };
 
@@ -656,24 +1098,15 @@ export function Map3D({
     }
   };
 
-  const handleToggleBuildings = () => {
-    if (!mapRef.current) return;
-    const map = mapRef.current;
-    const nextVal = !showBuildings;
-    setShowBuildings(nextVal);
-    if (map.getLayer('3d-buildings')) {
-      map.setLayoutProperty('3d-buildings', 'visibility', nextVal ? 'visible' : 'none');
-    }
-    if (map.getLayer('flooded-buildings-layer')) {
-      map.setLayoutProperty('flooded-buildings-layer', 'visibility', nextVal ? 'visible' : 'none');
-    }
-  };
-
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
       <div
         ref={mapContainerRef}
-        style={{ width: '100%', height: '100%', cursor: mode === 'armed' ? 'crosshair' : 'grab' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          cursor: isOrbiting ? 'grab' : (mode === 'armed' ? 'crosshair' : 'grab')
+        }}
       />
 
       {mapError && (
@@ -686,15 +1119,24 @@ export function Map3D({
         </div>
       )}
 
-      {/* Floating Tools (Top-Right) */}
+      {/* Floating Tools (Top-Right) with State-Wide Extents */}
       <div className="gmaps-floating-tools">
+        <button
+          onClick={handleFlyToFullKarnataka}
+          className="gmaps-tool-btn"
+          title="View Full Karnataka State (Multi-Resolution Spatial Drainage Index)"
+        >
+          <Maximize2 size={14} style={{ color: '#00f0ff' }} />
+          <span>Full Karnataka</span>
+        </button>
+
         <button
           onClick={handleResetCamera}
           className="gmaps-tool-btn"
-          title="Reset Camera to Bengaluru (Lat 12.9352, Lng 77.6805, Pitch 55°)"
+          title="Reset Camera to Bengaluru Center (Pitch 55°)"
         >
-          <Compass size={15} style={{ color: '#8ab4f8' }} />
-          <span>Reset Camera</span>
+          <Compass size={14} style={{ color: '#8ab4f8' }} />
+          <span>Bengaluru City</span>
         </button>
 
         <button
@@ -702,25 +1144,167 @@ export function Map3D({
           className={`gmaps-tool-btn ${showTerrain ? 'active' : ''}`}
           title="Toggle 3D Terrain DEM"
         >
-          <Layers size={15} style={{ color: showTerrain ? '#8ab4f8' : '#9aa0a6' }} />
+          <Layers size={14} style={{ color: showTerrain ? '#8ab4f8' : '#9aa0a6' }} />
           <span>Terrain 3D</span>
         </button>
 
         <button
-          onClick={handleToggleBuildings}
-          className={`gmaps-tool-btn ${showBuildings ? 'active' : ''}`}
+          onClick={onToggle3DBuildings}
+          className={`gmaps-tool-btn ${show3DBuildings ? 'active' : ''}`}
           title="Toggle 3D Buildings"
         >
-          <Eye size={15} style={{ color: showBuildings ? '#8ab4f8' : '#9aa0a6' }} />
+          <Eye size={14} style={{ color: show3DBuildings ? '#8ab4f8' : '#9aa0a6' }} />
           <span>3D Buildings</span>
         </button>
       </div>
+
+      {/* 360° Street View / Panoramic First-Person Look-Around Controller HUD */}
+      {isOrbiting && (
+        <>
+          <div className="panorama-drag-hint">
+            <RotateCcw size={14} style={{ color: '#00f0ff' }} />
+            <span>Click & Drag to Look Around in 360° (Heading & Pitch Locked to Origin)</span>
+          </div>
+
+          <div className="panorama-hud">
+            <div className="orbit-info">
+              <div className="orbit-pulsing-dot" />
+              <span>Street View: <strong>{blockLabel || 'Origin Centroid'}</strong></span>
+            </div>
+
+            <div className="orbit-divider" />
+
+            {/* Compass Heading Gauge */}
+            <div className="panorama-badge" title="Continuous 360° Yaw Heading">
+              <Compass size={13} />
+              <span>{getCompassHeadingLabel(hudYaw)}</span>
+            </div>
+
+            {/* Pitch Gauge */}
+            <div className="panorama-badge" title="Vertical Pitch (Clamped 5° - 85°)">
+              <Gauge size={13} />
+              <span>Pitch: {hudPitch}°</span>
+            </div>
+
+            <div className="orbit-divider" />
+
+            {/* Auto-Pan Slow Scan Toggle */}
+            <button
+              onClick={() => setIs360AutoPanning(prev => !prev)}
+              className="panorama-btn"
+              title={is360AutoPanning ? "Pause Auto-Pan Scan" : "Start 360° Panoramic Scan"}
+            >
+              {is360AutoPanning ? <Pause size={12} fill="#00f0ff" /> : <Play size={12} fill="#00f0ff" />}
+              <span>{is360AutoPanning ? 'Pause Scan' : 'Auto-Pan'}</span>
+            </button>
+
+            {/* Reset to North */}
+            <button
+              onClick={() => {
+                targetYawRef.current = 0;
+                targetPitchRef.current = 55;
+                velYawRef.current = 0;
+                velPitchRef.current = 0;
+              }}
+              className="panorama-btn"
+              title="Reset Facing True North"
+            >
+              <RotateCcw size={12} />
+              <span>Face North</span>
+            </button>
+
+            <div className="orbit-divider" />
+
+            {/* Exit 360 View */}
+            <button
+              onClick={onToggleOrbit}
+              className="panorama-exit-btn"
+              title="Exit 360° Street View & Return to Orbit/Map Mode"
+            >
+              <X size={13} />
+              <span>Exit 360°</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Active Drainage Chokepoint Telemetry Popup Card */}
+      {activeDrainAlert && (
+        <div className="drainage-popup-card">
+          <div className="drainage-popup-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert size={18} style={{ color: activeDrainAlert.currentStatus === 'Severe' ? '#ef4444' : activeDrainAlert.currentStatus === 'Moderate' ? '#f59e0b' : '#10b981' }} />
+              <div>
+                <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#f8fafc', lineHeight: 1.2 }}>
+                  {activeDrainAlert.name}
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                  {activeDrainAlert.district ? `${activeDrainAlert.district} • ` : ''}{activeDrainAlert.valley}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveDrainAlert(null)}
+              className="drainage-popup-close"
+              title="Close Card"
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          <div className="drainage-popup-body">
+            <div className="drainage-stat-row">
+              <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>Design vs Observed Discharge:</span>
+              <strong style={{ color: activeDrainAlert.currentDischargeM3s > activeDrainAlert.designCapacityM3s ? '#ef4444' : '#10b981', fontSize: '12.5px' }}>
+                {activeDrainAlert.currentDischargeM3s} / {activeDrainAlert.designCapacityM3s} m³/s
+                <span style={{ fontSize: '11px', marginLeft: '4px' }}>
+                  ({Math.round((activeDrainAlert.currentDischargeM3s / activeDrainAlert.designCapacityM3s) * 100)}%)
+                </span>
+              </strong>
+            </div>
+
+            <div className="drainage-stat-row">
+              <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>Current Alert Severity:</span>
+              <span className="drainage-status-badge" style={{
+                background: activeDrainAlert.currentStatus === 'Severe' ? 'rgba(239, 68, 68, 0.2)' : activeDrainAlert.currentStatus === 'Moderate' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                color: activeDrainAlert.currentStatus === 'Severe' ? '#ef4444' : activeDrainAlert.currentStatus === 'Moderate' ? '#f59e0b' : '#10b981',
+                border: `1px solid ${activeDrainAlert.currentStatus === 'Severe' ? '#ef4444' : activeDrainAlert.currentStatus === 'Moderate' ? '#f59e0b' : '#10b981'}44`
+              }}>
+                {activeDrainAlert.currentStatus || activeDrainAlert.defaultStatus}
+              </span>
+            </div>
+
+            <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: '1.45', marginTop: '6px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '6px' }}>
+              {activeDrainAlert.description}
+            </div>
+
+            {activeDrainAlert.overrideNote && (
+              <div style={{ fontSize: '10.5px', color: '#38bdf8', marginTop: '4px', fontStyle: 'italic' }}>
+                ✓ {activeDrainAlert.overrideNote}
+              </div>
+            )}
+          </div>
+
+          <div className="drainage-popup-footer">
+            <button
+              onClick={() => {
+                if (onOpenReportModal) onOpenReportModal(activeDrainAlert.id);
+                setActiveDrainAlert(null);
+              }}
+              className="drainage-override-btn"
+            >
+              <ShieldAlert size={14} />
+              <span>Report / Change Status</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mode Instructions Indicator in Armed Mode */}
       {mode === 'armed' && (
         <div className="gmaps-armed-hint-banner">
           <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#00f0ff', boxShadow: '0 0 10px #00f0ff' }} />
-          <span>Search an area or click anywhere on Bengaluru to extract a 1 km x 1 km simulation zone.</span>
+          <span>Search an area or click anywhere across Karnataka to extract a 1 km x 1 km simulation zone.</span>
         </div>
       )}
     </div>

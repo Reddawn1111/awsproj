@@ -260,7 +260,8 @@ function calculateLocalBlockSimulation(payload) {
     flooded_sqkm: floodFraction,
     impacted_arterial_roads: Math.round(floodFraction * 8),
     infrastructure: [],
-    pooled_cells
+    pooled_cells,
+    sequence_24h: []
   };
 }
 
