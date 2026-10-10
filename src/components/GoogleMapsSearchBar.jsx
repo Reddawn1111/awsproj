@@ -18,7 +18,9 @@ import {
   Layers,
   Pause,
   Compass,
-  AlertTriangle
+  AlertTriangle,
+  Route,
+  CloudRain
 } from 'lucide-react';
 import { searchLocationIQ } from '../services/locationiq';
 import { BENGALURU_HOTSPOTS } from '../config/bengaluruHotspots';
@@ -131,7 +133,11 @@ export function GoogleMapsSearchBar({
   isTopView = false,
   onTogglePerspective,
   onOpenDemo,
-  onOpenReport
+  onOpenReport,
+  onToggleRoutePlanner,
+  isRoutePlannerOpen = false,
+  onToggleEnvIntel,
+  isEnvIntelOpen = false
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -867,6 +873,98 @@ export function GoogleMapsSearchBar({
               </div>
               <span style={{ fontSize: '9.5px', color: '#f87171', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(0, 0, 0, 0.25)' }}>
                 Drain Audit
+              </span>
+            </button>
+
+            {/* Action 7: Alternative Route Planner (Flood Bypass Corridor) */}
+            <button
+              type="button"
+              onClick={onToggleRoutePlanner}
+              title="Open Alternative Route Planner with corridor flood hazard detection & bypass routing"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                padding: '7px 10px',
+                borderRadius: '8px',
+                border: `1px solid ${isRoutePlannerOpen ? '#45d6c5' : 'rgba(69, 214, 197, 0.25)'}`,
+                background: isRoutePlannerOpen ? 'rgba(69, 214, 197, 0.18)' : 'rgba(69, 214, 197, 0.06)',
+                color: isRoutePlannerOpen ? '#45d6c5' : '#9cf0dd',
+                fontSize: '11.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: isRoutePlannerOpen ? '0 0 12px rgba(69, 214, 197, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = isRoutePlannerOpen ? 'rgba(69, 214, 197, 0.24)' : 'rgba(69, 214, 197, 0.14)';
+                e.currentTarget.style.borderColor = 'rgba(69, 214, 197, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = isRoutePlannerOpen ? 'rgba(69, 214, 197, 0.18)' : 'rgba(69, 214, 197, 0.06)';
+                e.currentTarget.style.borderColor = isRoutePlannerOpen ? '#45d6c5' : 'rgba(69, 214, 197, 0.25)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Route size={14} style={{ color: isRoutePlannerOpen ? '#45d6c5' : '#34d399' }} />
+                <span>Route Planner</span>
+              </div>
+              <span style={{
+                fontSize: '9.5px',
+                color: isRoutePlannerOpen ? '#45d6c5' : '#34d399',
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                background: 'rgba(0, 0, 0, 0.25)'
+              }}>
+                {isRoutePlannerOpen ? 'Active' : 'Flood Bypass'}
+              </span>
+            </button>
+
+            {/* Action 8: Environmental Intelligence & Satellite WMS */}
+            <button
+              type="button"
+              onClick={onToggleEnvIntel}
+              title="Open Environmental Intelligence panel with real-time weather & ISRO Bhuvan satellite WMS layers"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                padding: '7px 10px',
+                borderRadius: '8px',
+                border: `1px solid ${isEnvIntelOpen ? '#38bdf8' : 'rgba(56, 189, 248, 0.25)'}`,
+                background: isEnvIntelOpen ? 'rgba(56, 189, 248, 0.18)' : 'rgba(56, 189, 248, 0.06)',
+                color: isEnvIntelOpen ? '#38bdf8' : '#bae6fd',
+                fontSize: '11.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: isEnvIntelOpen ? '0 0 12px rgba(56, 189, 248, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = isEnvIntelOpen ? 'rgba(56, 189, 248, 0.24)' : 'rgba(56, 189, 248, 0.14)';
+                e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = isEnvIntelOpen ? 'rgba(56, 189, 248, 0.18)' : 'rgba(56, 189, 248, 0.06)';
+                e.currentTarget.style.borderColor = isEnvIntelOpen ? '#38bdf8' : 'rgba(56, 189, 248, 0.25)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CloudRain size={14} style={{ color: isEnvIntelOpen ? '#38bdf8' : '#60a5fa' }} />
+                <span>Environmental Intel</span>
+              </div>
+              <span style={{
+                fontSize: '9.5px',
+                color: isEnvIntelOpen ? '#38bdf8' : '#60a5fa',
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                background: 'rgba(0, 0, 0, 0.25)'
+              }}>
+                {isEnvIntelOpen ? 'Active' : 'WMS & Weather'}
               </span>
             </button>
           </div>

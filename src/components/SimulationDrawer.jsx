@@ -413,7 +413,7 @@ export function SimulationDrawer({
             ) : (
               <>
                 <Zap size={15} />
-                <span>Run 4clique AWS Simulation</span>
+                <span>Run 4clique AWS Hydrologic Simulation</span>
               </>
             )}
           </button>

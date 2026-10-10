@@ -13,6 +13,20 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lambda_function import lambda_handler
 
+def load_env():
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_file = os.path.join(parent_dir, ".env")
+    if os.path.exists(env_file):
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip('"').strip("'")
+                    os.environ[k] = v
+
+load_env()
+
 PORT = int(os.environ.get("LAMBDA_LOCAL_PORT", 8000))
 
 

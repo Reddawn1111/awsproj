@@ -4,6 +4,7 @@ import { TARGET_CAMERA, TERRAIN_CONFIG, BENGALURU_CENTER, KARNATAKA_CAMERA } fro
 import { boundsToGeoJSON, buildOutsideMaskGeoJSON, calculateGravityWaterFlow } from '../utils/geo';
 import { KARNATAKA_DRAINS, getKarnatakaDrainsGeoJSON, KARNATAKA_BOUNDS } from '../config/karnatakaDrains';
 import { calculateBlockRWH } from '../utils/rwh';
+import { getBhuvanWmsTileUrl } from '../services/bhuvanGeospatial';
 import {
   Layers,
   Compass,
@@ -67,7 +68,14 @@ export function Map3D({
   // 24-Hour Simulation Sequence Props
   sim24Sequence = null,
   currentSimHour = 0,
-  is24SimActive = false
+  is24SimActive = false,
+  // Alternative Routing & Corridor Assessment Props
+  routePlan = null,
+  onSelectRoute = null,
+  // Environmental Intelligence, Bhuvan WMS & OSM Drainage Props
+  bhuvanLayersEnabled = null,
+  showOsmDrainage = false,
+  osmDrainageData = null
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -563,7 +571,183 @@ export function Map3D({
         map.on('mouseenter', 'karnataka-drain-unclustered-pin', () => { map.getCanvas().style.cursor = 'pointer'; });
         map.on('mouseleave', 'karnataka-drain-unclustered-pin', () => { map.getCanvas().style.cursor = ''; });
 
-        // 8. Water Surface Shimmer & Flow Lines Animation Loop
+        // =========================================================================
+        // 8. ALTERNATIVE ROUTE PLANNER & CORRIDOR HAZARDS GEOJSON LAYERS
+        // =========================================================================
+        map.addSource('route-plan-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'route-plan-casing',
+          type: 'line',
+          source: 'route-plan-source',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': '#08111b',
+            'line-width': ['case', ['==', ['get', 'selected'], true], 11, 8],
+            'line-opacity': 0.86
+          }
+        });
+        map.addLayer({
+          id: 'route-plan-line',
+          type: 'line',
+          source: 'route-plan-source',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': ['case', ['==', ['get', 'selected'], true], 7, 4],
+            'line-opacity': ['case', ['==', ['get', 'selected'], true], 1, 0.7]
+          }
+        });
+
+        map.addSource('route-hazards-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'route-hazards-circles',
+          type: 'circle',
+          source: 'route-hazards-source',
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 5, 15, 12],
+            'circle-color': ['match', ['get', 'level'], 'critical', '#ea4335', 'warning', '#fbbc04', '#34a853'],
+            'circle-opacity': 0.78,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 1.5
+          }
+        });
+        map.addLayer({
+          id: 'route-hazards-labels',
+          type: 'symbol',
+          source: 'route-hazards-source',
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-size': 11,
+            'text-offset': [0, 1.4],
+            'text-anchor': 'top',
+            'text-optional': true
+          },
+          paint: {
+            'text-color': '#ffe0b2',
+            'text-halo-color': '#111820',
+            'text-halo-width': 1.5
+          }
+        });
+
+        map.addSource('route-endpoints-source', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: 'route-endpoints-circles',
+          type: 'circle',
+          source: 'route-endpoints-source',
+          paint: {
+            'circle-radius': 7,
+            'circle-color': ['match', ['get', 'role'], 'START', '#34a853', '#8ab4f8'],
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 2
+          }
+        });
+        map.addLayer({
+          id: 'route-endpoints-labels',
+          type: 'symbol',
+          source: 'route-endpoints-source',
+          layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-anchor': 'top' },
+          paint: { 'text-color': '#ffffff', 'text-halo-color': '#111820', 'text-halo-width': 1.5 }
+        });
+
+        // =========================================================================
+        // 9. ISRO NRSC BHUVAN SATELLITE WMS RASTER LAYERS
+        // =========================================================================
+        try {
+          map.addSource('bhuvan-waterbodies-src', {
+            type: 'raster',
+            tiles: [getBhuvanWmsTileUrl('basemap:waterbody_DEM')],
+            tileSize: 256
+          });
+          map.addLayer({
+            id: 'bhuvan-waterbodies-layer',
+            type: 'raster',
+            source: 'bhuvan-waterbodies-src',
+            paint: { 'raster-opacity': 0.70 },
+            layout: { visibility: 'none' }
+          }, '3d-buildings');
+
+          map.addSource('bhuvan-watershed-src', {
+            type: 'raster',
+            tiles: [getBhuvanWmsTileUrl('cite:bhuvan_watershed')],
+            tileSize: 256
+          });
+          map.addLayer({
+            id: 'bhuvan-watershed-layer',
+            type: 'raster',
+            source: 'bhuvan-watershed-src',
+            paint: { 'raster-opacity': 0.60 },
+            layout: { visibility: 'none' }
+          }, '3d-buildings');
+
+          map.addSource('bhuvan-slope-src', {
+            type: 'raster',
+            tiles: [getBhuvanWmsTileUrl('sdv:ka_slope')],
+            tileSize: 256
+          });
+          map.addLayer({
+            id: 'bhuvan-slope-layer',
+            type: 'raster',
+            source: 'bhuvan-slope-src',
+            paint: { 'raster-opacity': 0.50 },
+            layout: { visibility: 'none' }
+          }, '3d-buildings');
+        } catch (bhuvanErr) {
+          console.warn("Bhuvan WMS layer initialization warning:", bhuvanErr);
+        }
+
+        // =========================================================================
+        // 10. OPENSTREETMAP STORMWATER DRAINAGE & MICRO-CULVERTS
+        // =========================================================================
+        try {
+          map.addSource('osm-drainage-src', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          });
+          map.addLayer({
+            id: 'osm-drainage-lines',
+            type: 'line',
+            source: 'osm-drainage-src',
+            filter: ['==', '$type', 'LineString'],
+            paint: {
+              'line-color': '#34d399',
+              'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2.5, 16, 5],
+              'line-dasharray': [2, 1.5],
+              'line-opacity': 0.88
+            },
+            layout: { visibility: 'none' }
+          }, '3d-buildings');
+          map.addLayer({
+            id: 'osm-drainage-points',
+            type: 'circle',
+            source: 'osm-drainage-src',
+            filter: ['==', '$type', 'Point'],
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 3, 16, 6],
+              'circle-color': '#10b981',
+              'circle-stroke-width': 1.5,
+              'circle-stroke-color': '#ffffff',
+              'circle-opacity': 0.95
+            },
+            layout: { visibility: 'none' }
+          });
+        } catch (osmErr) {
+          console.warn("OSM drainage layer initialization warning:", osmErr);
+        }
+
+        // Route Line Interactivity
+        map.on('mouseenter', 'route-plan-line', () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', 'route-plan-line', () => { map.getCanvas().style.cursor = ''; });
+
+        // 11. Water Surface Shimmer & Flow Lines Animation Loop
         let animStep = 0;
         const animateFlow = () => {
           animStep += 1;
@@ -1147,6 +1331,142 @@ export function Map3D({
       locateMarkerRef.current = marker;
     }
   }, [userLocation, mapLoaded]);
+
+  // Sync Route Plan Lines, Hazards, Endpoints & Interactivity
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+
+    const routeSource = map.getSource('route-plan-source');
+    const hazardSource = map.getSource('route-hazards-source');
+    const endpointSource = map.getSource('route-endpoints-source');
+
+    const routeColors = ['#45d6c5', '#8ab4f8', '#fbbc04', '#c58af9'];
+    const routeFeatures = (routePlan?.routes || []).map((route, index) => {
+      let color = routeColors[index % routeColors.length];
+      if (route.isSafeBypass) {
+        color = '#45d6c5'; // Emerald safe bypass
+      } else if (route.isBlocked || route.assessment === 'critical') {
+        color = '#ea4335'; // Red blocked route
+      }
+      return {
+        type: 'Feature',
+        properties: {
+          routeId: route.id,
+          selected: route.id === routePlan?.selectedRouteId,
+          isSafeBypass: !!route.isSafeBypass,
+          color
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: route.coordinates
+        }
+      };
+    });
+
+    if (routeSource) {
+      routeSource.setData({
+        type: 'FeatureCollection',
+        features: routeFeatures
+      });
+    }
+
+    if (hazardSource) {
+      // Only render hazard points along an active route; strictly filter out synthetic block grid cells
+      const activeHazards = (routePlan?.routes?.length > 0)
+        ? (routePlan?.hazards || []).filter(hazard => !hazard.id?.startsWith('block-cell-'))
+        : [];
+
+      hazardSource.setData({
+        type: 'FeatureCollection',
+        features: activeHazards.map(hazard => ({
+          type: 'Feature',
+          properties: {
+            id: hazard.id,
+            label: hazard.name ? `${hazard.name}${hazard.depth_meters ? ` (${Number(hazard.depth_meters).toFixed(1)}m)` : ''}` : 'Modeled flood area',
+            level: hazard.level || (hazard.depth_meters >= 0.5 ? 'critical' : 'warning')
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: hazard.coords
+          }
+        }))
+      });
+    }
+
+    if (endpointSource) {
+      const endpoints = [];
+      if (routePlan?.origin?.coords) {
+        endpoints.push({
+          type: 'Feature',
+          properties: { role: 'START', label: routePlan.origin.label || 'Start' },
+          geometry: { type: 'Point', coordinates: routePlan.origin.coords }
+        });
+      }
+      if (routePlan?.destination?.coords) {
+        endpoints.push({
+          type: 'Feature',
+          properties: { role: 'DESTINATION', label: routePlan.destination.label || 'Destination' },
+          geometry: { type: 'Point', coordinates: routePlan.destination.coords }
+        });
+      }
+      endpointSource.setData({
+        type: 'FeatureCollection',
+        features: endpoints
+      });
+    }
+  }, [routePlan, mapLoaded]);
+
+  // Click handler on route lines to select route
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded || !onSelectRoute) return;
+    const map = mapRef.current;
+
+    const handleRouteClick = (e) => {
+      const routeId = e.features?.[0]?.properties?.routeId;
+      if (routeId) onSelectRoute(routeId);
+    };
+
+    map.on('click', 'route-plan-line', handleRouteClick);
+    return () => {
+      map.off('click', 'route-plan-line', handleRouteClick);
+    };
+  }, [mapLoaded, onSelectRoute]);
+
+  // Sync Bhuvan WMS Overlays Visibility
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+
+    if (map.getLayer('bhuvan-waterbodies-layer')) {
+      map.setLayoutProperty('bhuvan-waterbodies-layer', 'visibility', bhuvanLayersEnabled?.waterbodies ? 'visible' : 'none');
+    }
+    if (map.getLayer('bhuvan-watershed-layer')) {
+      map.setLayoutProperty('bhuvan-watershed-layer', 'visibility', bhuvanLayersEnabled?.watershed ? 'visible' : 'none');
+    }
+    if (map.getLayer('bhuvan-slope-layer')) {
+      map.setLayoutProperty('bhuvan-slope-layer', 'visibility', bhuvanLayersEnabled?.slope ? 'visible' : 'none');
+    }
+  }, [bhuvanLayersEnabled, mapLoaded]);
+
+  // Sync OSM Drainage Layers Data & Visibility
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+    const map = mapRef.current;
+
+    const src = map.getSource('osm-drainage-src');
+    if (src && osmDrainageData) {
+      src.setData(osmDrainageData);
+    }
+
+    const vis = showOsmDrainage ? 'visible' : 'none';
+    if (map.getLayer('osm-drainage-lines')) {
+      map.setLayoutProperty('osm-drainage-lines', 'visibility', vis);
+    }
+    if (map.getLayer('osm-drainage-points')) {
+      map.setLayoutProperty('osm-drainage-points', 'visibility', vis);
+    }
+  }, [showOsmDrainage, osmDrainageData, mapLoaded]);
 
   const handleResetCamera = () => {
     if (!mapRef.current) return;

@@ -1046,3 +1046,687 @@ body {
 }
 
 
+
+/* =========================================================================
+   ALTERNATIVE ROUTE PLANNER PANEL
+   ========================================================================= */
+
+.route-planner-panel {
+  position: absolute;
+  top: 74px;
+  left: 16px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 90px);
+  background: rgba(18, 22, 30, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 1px rgba(0, 240, 255, 0.25);
+  z-index: 40;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: fadeInSlideDown 0.22s ease-out;
+}
+
+.route-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(24, 28, 38, 0.85);
+}
+
+.route-panel-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(69, 214, 197, 0.14);
+  border: 1px solid rgba(69, 214, 197, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #45d6c5;
+}
+
+.route-panel-header strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #f1f5f9;
+}
+
+.route-panel-header span {
+  display: block;
+  font-size: 9.5px;
+  color: #94a3b8;
+  margin-top: 1px;
+}
+
+.route-planner-form {
+  position: relative;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-location-field {
+  position: relative;
+}
+
+.route-location-field label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.route-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #8ab4f8;
+  transition: all 0.18s ease;
+}
+
+.route-input-wrap:focus-within {
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+}
+
+.route-input-wrap input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 0;
+}
+
+.route-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 4px;
+  background: rgba(18, 22, 30, 0.98);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
+  z-index: 50;
+}
+
+.route-search-results button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  color: #f1f5f9;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.route-search-results button:hover {
+  background: rgba(0, 240, 255, 0.1);
+}
+
+.route-search-results strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e8eaed;
+}
+
+.route-search-results span {
+  display: block;
+  font-size: 9px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.route-swap-button {
+  position: absolute;
+  right: 22px;
+  top: 56px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(24, 28, 38, 0.95);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.route-swap-button:hover {
+  color: #00f0ff;
+  border-color: #00f0ff;
+}
+
+.route-plan-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #45d6c5 0%, #0077b6 100%);
+  color: #05080c;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(69, 214, 197, 0.35);
+  transition: all 0.18s ease;
+}
+
+.route-plan-button:hover {
+  box-shadow: 0 6px 20px rgba(69, 214, 197, 0.5);
+  transform: translateY(-1px);
+}
+
+.route-plan-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.route-panel-message {
+  padding: 0 14px 10px;
+  color: #fbbc04;
+  font-size: 10.5px;
+}
+
+.route-results {
+  padding: 0 14px 14px;
+  overflow-y: auto;
+  max-height: 48vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-data-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 2px 4px;
+  color: #94a3b8;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.route-recommendation {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(69, 214, 197, 0.1);
+  border: 1px solid rgba(69, 214, 197, 0.3);
+  color: #c5f5e8;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.route-recommendation svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #45d6c5;
+}
+
+.route-recommendation-warning {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
+.route-recommendation-warning svg {
+  color: #f87171;
+}
+
+.route-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.route-option:hover,
+.route-option.selected {
+  border-color: rgba(0, 240, 255, 0.5);
+  background: rgba(0, 240, 255, 0.08);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.15);
+}
+
+.route-option-color {
+  width: 4px;
+  height: 36px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.route-option-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.route-option-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.route-option-title em {
+  font-style: normal;
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(69, 214, 197, 0.2);
+  color: #45d6c5;
+}
+
+.route-option-title .route-critical-badge {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.route-option-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.route-option-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.route-option-hazards {
+  display: block;
+  margin-top: 4px;
+  font-size: 9.5px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.route-option-hazards.has-hazards {
+  color: #fca5a5;
+}
+
+.route-option-action {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8ab4f8;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.route-disclaimer {
+  margin: 6px 2px 0;
+  font-size: 9px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.route-warning-text {
+  color: #fbbc04;
+}
+
+/* -------------------------------------------------------------
+   Route Corridor Simulation & Stress Test UI Styles
+   ------------------------------------------------------------- */
+
+.route-header-close-btn {
+  width: 28px;
+  height: 28px;
+  color: #94a3b8;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  transition: all 0.15s ease;
+}
+
+.route-header-close-btn:hover {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.route-sim-controls-card {
+  margin: 0 14px 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(13, 17, 24, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-sim-controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.route-sim-title {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #e2e8f0;
+}
+
+.route-sim-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.route-sim-badge.is-preset {
+  background: rgba(251, 188, 4, 0.15);
+  color: #fbbc04;
+  border: 1px solid rgba(251, 188, 4, 0.3);
+}
+
+.route-sim-badge.is-realworld {
+  background: rgba(69, 214, 197, 0.15);
+  color: #45d6c5;
+  border: 1px solid rgba(69, 214, 197, 0.3);
+}
+
+.route-sim-mode-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.route-mode-btn {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.route-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e2e8f0;
+}
+
+.route-mode-btn.active {
+  background: rgba(69, 214, 197, 0.18);
+  border-color: #45d6c5;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(69, 214, 197, 0.2);
+}
+
+.route-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.route-preset-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.route-preset-pill:hover {
+  border-color: rgba(251, 188, 4, 0.4);
+  background: rgba(251, 188, 4, 0.06);
+}
+
+.route-preset-pill.active {
+  border-color: #fbbc04;
+  background: rgba(251, 188, 4, 0.16);
+  box-shadow: 0 0 12px rgba(251, 188, 4, 0.2);
+}
+
+.route-preset-pill strong {
+  font-size: 10.5px;
+  color: #f1f5f9;
+}
+
+.route-preset-pill small {
+  font-size: 8.5px;
+  color: #94a3b8;
+  margin-top: 1px;
+}
+
+.route-sliders-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.route-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.route-slider-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.route-slider-label span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.route-slider-label strong {
+  color: #38bdf8;
+}
+
+.route-range-slider {
+  width: 100%;
+  accent-color: #45d6c5;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.route-slider-quick-buttons {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.route-quick-btn {
+  flex: 1;
+  padding: 3px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.route-quick-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e2e8f0;
+}
+
+.route-quick-btn.selected {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+/* -------------------------------------------------------------
+   Proactive Rerouting Suggestion Banner
+   ------------------------------------------------------------- */
+
+.route-proactive-banner {
+  margin: 0 14px 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.15);
+  animation: fadeInSlideDown 0.2s ease-out;
+}
+
+.route-proactive-header {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.route-proactive-icon {
+  color: #f87171;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.route-proactive-text strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fca5a5;
+  letter-spacing: 0.02em;
+}
+
+.route-proactive-text p {
+  font-size: 10px;
+  color: #fee2e2;
+  margin: 2px 0 0;
+  line-height: 1.35;
+}
+
+.route-apply-safe-btn {
+  margin-top: 8px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(69, 214, 197, 0.3), rgba(16, 185, 129, 0.4));
+  border: 1px solid #45d6c5;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.route-apply-safe-btn:hover {
+  background: linear-gradient(135deg, rgba(69, 214, 197, 0.45), rgba(16, 185, 129, 0.55));
+  box-shadow: 0 0 14px rgba(69, 214, 197, 0.35);
+}
+
+/* -------------------------------------------------------------
+   Route Item Badges & Exit Button
+   ------------------------------------------------------------- */
+
+.route-option.is-safe-bypass {
+  border-color: rgba(69, 214, 197, 0.5);
+  background: rgba(69, 214, 197, 0.06);
+  box-shadow: 0 0 12px rgba(69, 214, 197, 0.15);
+}
+
+.route-safe-badge {
+  background: rgba(69, 214, 197, 0.25) !important;
+  color: #45d6c5 !important;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 8.5px;
+  font-style: normal;
+}
+
+.route-option.is-blocked {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.route-exit-footer-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.route-exit-footer-button:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}

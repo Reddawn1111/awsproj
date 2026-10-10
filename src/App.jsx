@@ -9,6 +9,8 @@ import { ReportModal } from './components/ReportModal';
 import { RainwaterHarvestModal } from './components/RainwaterHarvestModal';
 import { DemoPresetModal } from './components/DemoPresetModal';
 import { SimulationPlaybackDock } from './components/SimulationPlaybackDock';
+import { RoutePlannerPanel } from './components/RoutePlannerPanel';
+import { EnvironmentalIntelPanel } from './components/EnvironmentalIntelPanel';
 import { BENGALURU_HOTSPOTS, getBengaluruRainGridPoints, matchNearestRain } from './config/bengaluruHotspots';
 import { fetchCityRainGrid } from './services/openMeteo';
 import { runAwsBlockSimulation, runAwsLiveAssessment } from './services/awsSimulation';
@@ -17,6 +19,10 @@ import { generate24HourSimulationSequence } from './utils/simulation24h';
 import { reverseLocationIQ } from './services/locationiq';
 import { getStoredDrainageAlerts } from './config/drainageAlerts';
 import { BENGALURU_CENTER } from './config/camera';
+import { isLatestSimulationResponse } from './services/routeAssessment';
+import { fetchEnvironmentalIntelligence } from './services/environmentalIntelligence';
+import { checkBhuvanServiceStatus } from './services/bhuvanGeospatial';
+import { fetchOsmDrainageFeatures } from './services/osmDrainage';
 import { X } from 'lucide-react';
 
 export function App() {
@@ -77,6 +83,29 @@ export function App() {
 
   const [isDevToolsModalOpen, setIsDevToolsModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+  // Route Planner & Corridor Flood Bypass State
+  const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
+  const [routePlan, setRoutePlan] = useState({
+    routes: [],
+    selectedRouteId: null,
+    hazards: [],
+    origin: null,
+    destination: null,
+    assessments: []
+  });
+  const simulationRequestIdRef = useRef(0);
+  const simulationInputsRef = useRef({ rainfallMm: 120, cloggingPercent: 70, bounds: null });
+
+  // Environmental Intelligence, Bhuvan WMS & OSM Drainage State
+  const [isEnvIntelOpen, setIsEnvIntelOpen] = useState(false);
+  const [environmentalData, setEnvironmentalData] = useState(null);
+  const [isLoadingWeather, setIsLoadingWeather] = useState(false);
+  const [bhuvanLayersEnabled, setBhuvanLayersEnabled] = useState({ waterbodies: false, watershed: false, slope: false });
+  const [bhuvanStatus, setBhuvanStatus] = useState(null);
+  const [showOsmDrainage, setShowOsmDrainage] = useState(false);
+  const [osmDrainageData, setOsmDrainageData] = useState(null);
+  const [isLoadingOsm, setIsLoadingOsm] = useState(false);
 
   // 0. Automatic Geolocation on Mount (Fall back gracefully to Bengaluru Center)
   useEffect(() => {
@@ -248,6 +277,57 @@ export function App() {
     setSimError(null);
   };
 
+  // Teardown and exit Route Planner cleanly, wiping active routes and restoring map view
+  const handleCloseRoutePlanner = () => {
+    setIsRoutePlannerOpen(false);
+    setRoutePlan({
+      routes: [],
+      selectedRouteId: null,
+      hazards: [],
+      origin: null,
+      destination: null,
+      assessments: []
+    });
+
+    if (mapRef.current) {
+      if (preSelectionCameraRef.current) {
+        mapRef.current.easeTo({
+          center: preSelectionCameraRef.current.center,
+          zoom: preSelectionCameraRef.current.zoom,
+          pitch: preSelectionCameraRef.current.pitch,
+          bearing: preSelectionCameraRef.current.bearing,
+          duration: 900
+        });
+        preSelectionCameraRef.current = null;
+      } else {
+        const currentCenter = mapRef.current.getCenter();
+        mapRef.current.easeTo({
+          center: currentCenter,
+          pitch: isTopView ? 0 : 55,
+          bearing: -15,
+          zoom: 14.5,
+          duration: 900
+        });
+      }
+    }
+  };
+
+  const handleToggleRoutePlanner = () => {
+    if (isRoutePlannerOpen) {
+      handleCloseRoutePlanner();
+    } else {
+      if (mapRef.current && !preSelectionCameraRef.current) {
+        preSelectionCameraRef.current = {
+          center: mapRef.current.getCenter(),
+          zoom: mapRef.current.getZoom(),
+          pitch: mapRef.current.getPitch(),
+          bearing: mapRef.current.getBearing()
+        };
+      }
+      setIsRoutePlannerOpen(true);
+    }
+  };
+
   // 3. Toggle "SIMULATE" Mode: Decoupled Simulation Trigger
   // Simulation initializes and starts playback automatically ONLY when "SIMULATE" button is clicked
   const handleToggleSimulate = () => {
@@ -330,6 +410,9 @@ export function App() {
     if (!boundsToUse) return;
     setIsSimulating(true);
     setSimError(null);
+    const requestId = ++simulationRequestIdRef.current;
+    const requestedInputs = { rainfallMm: rainToUse, cloggingPercent: clogToUse, bounds: boundsToUse };
+    simulationInputsRef.current = requestedInputs;
 
     try {
       // Sample 16x16 terrain elevation grid inside the 1km block
@@ -343,10 +426,13 @@ export function App() {
         awsLambdaUrl
       });
 
+      if (!isLatestSimulationResponse(requestId, simulationRequestIdRef.current, requestedInputs, simulationInputsRef.current)) return;
+
       setBlockSimulationResult(result);
       setLatencyMs(result.latencyMs);
       setLastSuccessTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
+      if (!isLatestSimulationResponse(requestId, simulationRequestIdRef.current, requestedInputs, simulationInputsRef.current)) return;
       console.error("Block simulation failed:", err);
       setSimError(err.message);
     } finally {
@@ -448,6 +534,48 @@ export function App() {
     localStorage.setItem('4clique_lambda_url', url);
   };
 
+  // Simulation status indicator for routing safety assessment
+  const simulationStatus = isSimulating ? 'loading' : simError ? 'failed' : blockSimulationResult ? 'current' : 'idle';
+
+  // Fetch Environmental Intelligence (Real-time Open-Meteo Weather & Forecast)
+  const loadEnvironmentalData = async (coords = null) => {
+    const [lng, lat] = coords || (userLocation ? userLocation : [BENGALURU_CENTER[0], BENGALURU_CENTER[1]]);
+    setIsLoadingWeather(true);
+    try {
+      const data = await fetchEnvironmentalIntelligence(lat, lng);
+      setEnvironmentalData(data);
+    } catch (e) {
+      console.warn("Environmental data fetch failed:", e);
+    } finally {
+      setIsLoadingWeather(false);
+    }
+  };
+
+  // Check ISRO Bhuvan Status & Load Initial Environmental Telemetry
+  useEffect(() => {
+    checkBhuvanServiceStatus().then(setBhuvanStatus).catch(() => {});
+    loadEnvironmentalData();
+  }, []);
+
+  // Fetch OSM Drainage Features when active block or toggle changes
+  useEffect(() => {
+    if (showOsmDrainage && blockBounds) {
+      setIsLoadingOsm(true);
+      fetchOsmDrainageFeatures(blockBounds)
+        .then(data => setOsmDrainageData(data))
+        .catch(err => console.warn("OSM drainage fetch error:", err))
+        .finally(() => setIsLoadingOsm(false));
+    }
+  }, [showOsmDrainage, blockBounds]);
+
+  const handleToggleBhuvanLayer = (layerKey) => {
+    setBhuvanLayersEnabled(prev => ({ ...prev, [layerKey]: !prev[layerKey] }));
+  };
+
+  const handleToggleOsmDrainage = () => {
+    setShowOsmDrainage(prev => !prev);
+  };
+
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#13171f' }}>
       {/* 1. Full-Screen Mapbox Canvas with State-Wide Karnataka Drains & 360 Look-Around Controller */}
@@ -496,6 +624,13 @@ export function App() {
           sim24Sequence={sim24Sequence}
           currentSimHour={currentSimHour}
           is24SimActive={is24SimActive}
+          // Alternative Route Planning & Corridor Flood Bypass
+          routePlan={routePlan}
+          onSelectRoute={(id) => setRoutePlan(prev => ({ ...prev, selectedRouteId: id }))}
+          // ISRO Bhuvan WMS & OSM Drainage Overlays
+          bhuvanLayersEnabled={bhuvanLayersEnabled}
+          showOsmDrainage={showOsmDrainage}
+          osmDrainageData={osmDrainageData}
         />
       </div>
 
@@ -524,6 +659,10 @@ export function App() {
             setSelectedDrainIdForReport(null);
             setIsReportModalOpen(true);
           }}
+          onToggleRoutePlanner={handleToggleRoutePlanner}
+          isRoutePlannerOpen={isRoutePlannerOpen}
+          onToggleEnvIntel={() => setIsEnvIntelOpen(prev => !prev)}
+          isEnvIntelOpen={isEnvIntelOpen}
         />
       </div>
 
@@ -682,6 +821,38 @@ export function App() {
         currentRainfall={rainfallMm}
         currentClogging={cloggingPercent}
         onApplyPreset={handleApplyDemoPreset}
+      />
+
+      {/* 8. Alternative Route Planner & Corridor Flood Bypass Panel */}
+      <RoutePlannerPanel
+        isOpen={isRoutePlannerOpen}
+        onClose={handleCloseRoutePlanner}
+        mapboxToken={mapboxToken}
+        liveHotspots={liveHotspots}
+        simulationResult={blockSimulationResult}
+        simulationStatus={simulationStatus}
+        drainageAlerts={drainageAlerts}
+        selectedRouteId={routePlan.selectedRouteId}
+        onRoutesChange={setRoutePlan}
+      />
+
+      {/* 9. Environmental Intelligence & ISRO Bhuvan WMS Panel */}
+      <EnvironmentalIntelPanel
+        isOpen={isEnvIntelOpen}
+        onClose={() => setIsEnvIntelOpen(false)}
+        environmentalData={environmentalData}
+        terrainStats={elevationStats}
+        isLoadingWeather={isLoadingWeather}
+        onRefreshWeather={() => loadEnvironmentalData()}
+        bhuvanLayersEnabled={bhuvanLayersEnabled}
+        onToggleBhuvanLayer={handleToggleBhuvanLayer}
+        bhuvanStatus={bhuvanStatus}
+        showOsmDrainage={showOsmDrainage}
+        onToggleOsmDrainage={handleToggleOsmDrainage}
+        osmDrainageData={osmDrainageData}
+        isLoadingOsm={isLoadingOsm}
+        onApplyForecastToSimulator={(rate) => setRainfallMm(rate)}
+        blockLabel={blockLabel}
       />
 
       {/* DevTools & Settings Modals */}
