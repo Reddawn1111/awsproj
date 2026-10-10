@@ -17,6 +17,7 @@ import { generate24HourSimulationSequence } from './utils/simulation24h';
 import { reverseLocationIQ } from './services/locationiq';
 import { getStoredDrainageAlerts } from './config/drainageAlerts';
 import { BENGALURU_CENTER } from './config/camera';
+import { X } from 'lucide-react';
 
 export function App() {
   // App Mode: 'live' (city-wide baseline) | 'armed' (click-to-extract) | 'block' (active 1km drawer open)
@@ -55,6 +56,8 @@ export function App() {
   const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
   const collapseTimeoutRef = useRef(null);
   const mapRef = useRef(null);
+  const preSelectionCameraRef = useRef(null);
+  const [isTopView, setIsTopView] = useState(false);
 
   // Modals & Toolbar Controls State
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -183,6 +186,68 @@ export function App() {
     }
   };
 
+  // Perspective Controller: Toggle 2D Overhead Top View (pitch: 0) vs 3D Angled View (pitch: 58)
+  const handleToggleViewPerspective = () => {
+    if (!mapRef.current) return;
+    const nextIsTop = !isTopView;
+    setIsTopView(nextIsTop);
+    if (nextIsTop) {
+      mapRef.current.easeTo({
+        pitch: 0,
+        bearing: 0,
+        duration: 800
+      });
+    } else {
+      mapRef.current.easeTo({
+        pitch: 58,
+        bearing: -15,
+        duration: 800
+      });
+    }
+  };
+
+  // Clear Block Selection & Teardown / Return to Cached Pre-Selection Camera View
+  const handleClearBlockSelection = () => {
+    // 1. Clear active block selection state & remove highlight outline from map
+    setBlockBounds(null);
+    setBlockLabel('');
+    setAppMode('live');
+
+    // 2. Smoothly restore the camera back to the cached pre-selection state
+    // (preserving exact pitch, bearing, and zoom level the user had before selecting the block)
+    if (mapRef.current) {
+      if (preSelectionCameraRef.current) {
+        mapRef.current.easeTo({
+          center: preSelectionCameraRef.current.center,
+          zoom: preSelectionCameraRef.current.zoom,
+          pitch: preSelectionCameraRef.current.pitch,
+          bearing: preSelectionCameraRef.current.bearing,
+          duration: 900
+        });
+        preSelectionCameraRef.current = null;
+      } else {
+        const currentCenter = mapRef.current.getCenter();
+        mapRef.current.easeTo({
+          center: currentCenter,
+          pitch: isTopView ? 0 : 55,
+          bearing: 0,
+          duration: 900
+        });
+      }
+    }
+
+    // 3. Reset any staged or running simulation state for that block
+    setIsSimulateMode(false);
+    setBlockSimulationResult(null);
+    setBlockRwhStats(null);
+    setElevationStats(null);
+    setIs24SimActive(false);
+    setIs24SimPlaying(false);
+    setSim24Sequence(null);
+    setCurrentSimHour(0);
+    setSimError(null);
+  };
+
   // 3. Toggle "SIMULATE" Mode: Decoupled Simulation Trigger
   // Simulation initializes and starts playback automatically ONLY when "SIMULATE" button is clicked
   const handleToggleSimulate = () => {
@@ -192,6 +257,14 @@ export function App() {
 
       let targetBounds = blockBounds;
       if (!targetBounds) {
+        if (mapRef.current && !preSelectionCameraRef.current) {
+          preSelectionCameraRef.current = {
+            center: mapRef.current.getCenter(),
+            zoom: mapRef.current.getZoom(),
+            pitch: mapRef.current.getPitch(),
+            bearing: mapRef.current.getBearing()
+          };
+        }
         // If no block selected yet, auto-select a 1 km x 1 km block around current map center or Bellandur
         const center = mapRef.current ? mapRef.current.getCenter() : { lng: 77.6805, lat: 12.9352 };
         targetBounds = calculateSquareBounds(center.lng, center.lat);
@@ -203,22 +276,24 @@ export function App() {
       runBlockSimulationInternal(targetBounds, rainfallMm, cloggingPercent);
       init24HourSimulation(targetBounds, rainfallMm, cloggingPercent);
     } else {
-      // Exit simulation mode & clear active simulation state
-      setIsSimulateMode(false);
-      setAppMode('live');
-      setBlockBounds(null);
-      setBlockSimulationResult(null);
-      setBlockRwhStats(null);
-      setIs24SimActive(false);
-      setIs24SimPlaying(false);
-      setSim24Sequence(null);
-      setCurrentSimHour(0);
+      // Exit simulation mode & cleanly teardown active block state
+      handleClearBlockSelection();
     }
   };
 
   // 4. Area / Block Selection on Coordinate Selection (Search result or map click)
   // Decoupled: ONLY highlights the boundary outline as active. Does NOT auto-run simulation.
   const handleSelectCoordsForBlock = async ([lng, lat], label = null) => {
+    // Preserve camera state right before transition to block
+    if (mapRef.current && !preSelectionCameraRef.current) {
+      preSelectionCameraRef.current = {
+        center: mapRef.current.getCenter(),
+        zoom: mapRef.current.getZoom(),
+        pitch: mapRef.current.getPitch(),
+        bearing: mapRef.current.getBearing()
+      };
+    }
+
     const bounds = calculateSquareBounds(lng, lat);
     setBlockBounds(bounds);
     setAppMode('block');
@@ -359,18 +434,9 @@ export function App() {
     }
   };
 
-  // Map movement auto-collapse search bar
-  const handleMapMoveStart = () => {
-    if (collapseTimeoutRef.current) clearTimeout(collapseTimeoutRef.current);
-    setIsSearchCollapsed(true);
-  };
-
-  const handleMapIdle = () => {
-    if (collapseTimeoutRef.current) clearTimeout(collapseTimeoutRef.current);
-    collapseTimeoutRef.current = setTimeout(() => {
-      setIsSearchCollapsed(false);
-    }, 600);
-  };
+  // Map movement handlers (retains user-controlled dropdown state without auto-collapsing)
+  const handleMapMoveStart = () => {};
+  const handleMapIdle = () => {};
 
   const handleSaveMapboxToken = (token) => {
     setMapboxToken(token);
@@ -396,6 +462,20 @@ export function App() {
           cloggingPercent={cloggingPercent}
           userLocation={userLocation}
           onMapClickForBlock={(coords) => {
+            // Natural fallback dismiss handler when clicking empty/unselected map space outside the active block
+            if (blockBounds) {
+              const [lng, lat] = coords;
+              const isInside =
+                lng >= blockBounds.minLng &&
+                lng <= blockBounds.maxLng &&
+                lat >= blockBounds.minLat &&
+                lat <= blockBounds.maxLat;
+
+              if (!isInside) {
+                handleClearBlockSelection();
+                return;
+              }
+            }
             handleSelectCoordsForBlock(coords);
           }}
           liveHotspots={liveHotspots}
@@ -411,6 +491,7 @@ export function App() {
           onToggleOrbit={() => setIsOrbiting(prev => !prev)}
           show3DBuildings={show3DBuildings}
           onToggle3DBuildings={() => setShow3DBuildings(prev => !prev)}
+          onPitchChange={(isTop) => setIsTopView(isTop)}
           // 24-Hour Simulation Sequence Props
           sim24Sequence={sim24Sequence}
           currentSimHour={currentSimHour}
@@ -419,7 +500,7 @@ export function App() {
       </div>
 
       {/* 2. Google Maps Collapsible Search Bar (Top-Left) with Docked Secondary Utility Ribbon */}
-      <div style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 30, maxWidth: '460px', width: 'calc(100vw - 32px)' }}>
+      <div style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 30, maxWidth: '520px', width: 'calc(100vw - 32px)' }}>
         <GoogleMapsSearchBar
           onSelectLocation={(coords, label) => {
             handleSelectCoordsForBlock(coords, label);
@@ -436,6 +517,8 @@ export function App() {
           isOrbiting={isOrbiting}
           show3DBuildings={show3DBuildings}
           onToggle3DBuildings={() => setShow3DBuildings(prev => !prev)}
+          isTopView={isTopView}
+          onTogglePerspective={handleToggleViewPerspective}
           onOpenDemo={() => setIsDemoModalOpen(true)}
           onOpenReport={() => {
             setSelectedDrainIdForReport(null);
@@ -453,21 +536,81 @@ export function App() {
         onOpenSettings={() => setIsSettingsModalOpen(true)}
       />
 
+      {/* 3b. Floating Exit Block View Button (Anchored Top-Center, offset lower during 360° View to prevent overlay collision) */}
+      {blockBounds && (
+        <div
+          style={{
+            position: 'absolute',
+            top: isOrbiting ? '118px' : '68px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 32,
+            display: 'flex',
+            alignItems: 'center',
+            animation: 'fadeInSlideDown 0.2s ease-out',
+            pointerEvents: 'auto',
+            transition: 'top 0.25s ease'
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleClearBlockSelection}
+            title="Clear block selection and return to city overview"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '20px',
+              background: 'rgba(20, 24, 32, 0.94)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#f1f5f9',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              cursor: 'pointer',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5), 0 0 1px rgba(0, 240, 255, 0.25)',
+              transition: 'all 0.18s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.14)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+              e.currentTarget.style.color = '#ffffff';
+              e.currentTarget.style.boxShadow = '0 6px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(239, 68, 68, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(20, 24, 32, 0.94)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+              e.currentTarget.style.color = '#f1f5f9';
+              e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5), 0 0 1px rgba(0, 240, 255, 0.25)';
+            }}
+          >
+            <X size={13} style={{ color: '#f87171' }} />
+            <span>Exit Block View</span>
+            {blockLabel && (
+              <span
+                style={{
+                  fontSize: '11px',
+                  color: '#94a3b8',
+                  maxWidth: '180px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                • {blockLabel}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* 4. Floating 1 km x 1 km Simulation Drawer with 24h Timeline & Dynamic RWH Breakdown */}
       <SimulationDrawer
         isOpen={isSimulateMode && !!blockBounds}
-        onClose={() => {
-          setIsSimulateMode(false);
-          setAppMode('live');
-          setBlockBounds(null);
-          setBlockSimulationResult(null);
-          setElevationStats(null);
-          setBlockRwhStats(null);
-          setIs24SimActive(false);
-          setIs24SimPlaying(false);
-          setSim24Sequence(null);
-          setCurrentSimHour(0);
-        }}
+        onClose={handleClearBlockSelection}
         blockBounds={blockBounds}
         blockLabel={blockLabel}
         rainfallMm={rainfallMm}

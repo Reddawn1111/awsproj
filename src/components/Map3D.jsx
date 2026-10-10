@@ -63,6 +63,7 @@ export function Map3D({
   onToggleOrbit = null,
   show3DBuildings = true,
   onToggle3DBuildings = null,
+  onPitchChange = null,
   // 24-Hour Simulation Sequence Props
   sim24Sequence = null,
   currentSimHour = 0,
@@ -145,7 +146,12 @@ export function Map3D({
 
       map.on('moveend', () => {
         if (onMapIdle) onMapIdle();
+        if (onPitchChange) onPitchChange(map.getPitch() <= 15);
         updateGravitySimulationAndBuildings();
+      });
+
+      map.on('pitchend', () => {
+        if (onPitchChange) onPitchChange(map.getPitch() <= 15);
       });
 
       map.on('idle', () => {
@@ -156,6 +162,12 @@ export function Map3D({
       map.on('click', (e) => {
         // Dismiss active drainage telemetry card if open
         setActiveDrainAlert(null);
+
+        // Guard against clicks on interactive drainage pin / cluster layers
+        const drainFeatures = map.queryRenderedFeatures(e.point, {
+          layers: ['karnataka-drain-clusters', 'karnataka-drain-unclustered-pin'].filter(l => map.getLayer(l))
+        });
+        if (drainFeatures.length > 0) return;
 
         if (onMapClickForBlock && !is360ActiveRef.current) {
           onMapClickForBlock([e.lngLat.lng, e.lngLat.lat]);
